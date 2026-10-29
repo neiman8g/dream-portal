@@ -2,7 +2,7 @@
 // demo data comes from data.json and changes are kept in this browser's localStorage.
 "use strict";
 
-const KEY = "crm-build-demo-v1";
+const KEY = "crm-build-demo-v3";
 let db;
 
 async function loadFresh() {
@@ -67,14 +67,6 @@ function transferPrice(item, company) {
 }
 
 const TYPES = { unit: "Units", battery: "Batteries", option: "Options", breaker: "Breakers", service: "Services", other: "Other" };
-const STATUS = {
-  none: "No status",
-  engineer_spec: "Engineer generic spec",
-  sales_progress: "Sales progress",
-  late: "Late",
-  no_activity: "No activity",
-  non_performing: "Non-performing rep",
-};
 const QSTATUS = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost", dropped: "Dropped" };
 
 function setPrice(item, companyId, value, note = "") {
@@ -162,7 +154,16 @@ function render() {
 
 // ── Home ───────────────────────────────────────────────────────
 
+const flagship = () => {
+  const counts = {};
+  for (const u of db.units) counts[u.productId] = (counts[u.productId] ?? 0) + 1;
+  return Number(Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]);
+};
+
 function homeView() {
+  const fp = flagship();
+  const fpName = esc(productTitle(byId(db.products, fp), parent().id));
+  const fpGroup = esc(byId(db.groups, byId(db.products, fp).groupId).name);
   const tile = (href, letter, color, title, text) =>
     `<a class="tile" href="${href}"><span class="ic" style="background:${color}">${letter}</span><b>${title}</b><p>${text}</p></a>`;
   return `
@@ -179,11 +180,11 @@ function homeView() {
     ${card(
       "Suggested walkthrough",
       `<ol class="steps">
-        <li>Open <a href="#/master">Product master</a> › Emergency Lighting Inverter UL924 › <a href="#/master/product/3/units">Power Wave 1 › Units</a>. Each part number is built from capacity, input voltage, output voltage and transformer, with a price for OLP, CPP and PPS.</li>
+        <li>Open <a href="#/master">Product master</a> › ${fpGroup} › <a href="#/master/product/${fp}/units">${fpName} › Units</a>. Each part number is built from capacity, input voltage and output voltage; N1 or T1 at the end is added automatically (T1 when a transformer is needed because the voltages differ). Each unit has a price for OLP, CPP and PPS.</li>
         <li>Change a price and press Save. Then open that part in the <a href="#/master/items">Item master</a> to see the price history.</li>
-        <li>Look at <a href="#/master/product/3/options">Options</a>: group › category › sub-option › assigned part number.</li>
-        <li>Open <a href="#/crm">CRM</a>, filter by territory, open a company and add a note for one of its contacts.</li>
-        <li>On that company, start a <b>New quote</b>, configure a unit with battery and options, and add it.</li>
+        <li>Look at <a href="#/master/product/${fp}/options">Options</a>: breakers, monitoring, testing, output circuits, batteries and more, each down to an assigned part number. <a href="#/master/product/${fp}/batteries">Batteries</a> come in runtimes from 90 to 240 minutes and in VRLA, NiCd and lithium.</li>
+        <li>Open <a href="#/crm">CRM</a>, filter by NEMRA territory, and open a company to see its activity, quotes, orders and employees. Add a note for one employee.</li>
+        <li>On that company, start a <b>New quote</b>. Type what the customer needs into the <b>Quote assistant</b> (or use the dropdowns), then press <b>Add to quote</b>.</li>
         <li>Press <b>View quote document</b> to see what the customer receives.</li>
         <li>Try a private label: <a href="#/master/companies">Companies &amp; private labels</a>, then quote Lumacore Systems with its multiplier.</li>
       </ol>`,
@@ -267,7 +268,7 @@ function productView(id, tab) {
     tab === "units" ? unitsTab(p) :
     tab === "batteries" ? batteriesTab(p) :
     tab === "options" ? optionsTab(p) :
-    tab === "configure" ? configurator(p, {}) :
+    tab === "configure" ? card("Quote assistant", assistantBox({ productId: p.id })) + `<div style="height:18px"></div>` + configurator(p, {}) :
     setupTab(p);
   return (
     pageHead(esc(productTitle(p, parent().id)), [["#/master", "Product groups"], [`#/master/group/${g.id}`, g.name]], right) +
@@ -383,6 +384,288 @@ function optionsTab(p) {
   );
 }
 
+// ── Quote assistant ────────────────────────────────────────────
+// Reads a plain-language request ("10 kW, 277 in 120 out, 120 min lithium, BACnet, seismic rack")
+// and sets the configurator's choices. Keyword rules only; anything it can't place is reported back.
+
+const chats = {};
+
+const OPTION_RULES = [
+  [/bacnet/, "bacnet"],
+  [/snmp|web card|network card/, "snmp"],
+  [/modbus/, "modbus"],
+  [/cloud|cellular|remote monitoring/, "cloud monitoring"],
+  [/dry contact|relay contacts?|form c/, "dry contact"],
+  [/annunciator|remote status/, "remote status panel"],
+  [/circuit monitor|per.circuit|branch monitor|lamp fail/, "per-circuit"],
+  [/cell monitor|battery monitor/, "cell monitoring"],
+  [/self.?test|auto.?test|nfpa/, "automatic monthly"],
+  [/remote test|test switch/, "remote test switch"],
+  [/printer|printed (test )?log/, "printed test log"],
+  [/data ?logger|event log/, "data logger"],
+  [/normally.?off|emergency.?only/, "normally-off"],
+  [/normally.?on/, "normally-on"],
+  [/mixed|split output/, "mixed"],
+  [/fast transfer|no.?break|\bhid\b/, "fast transfer"],
+  [/standard transfer|off.?line transfer/, "standard transfer"],
+  [/\b24\b[^,.;]*(branch|circuit)/, "24 circuits"],
+  [/\b16\b[^,.;]*(branch|circuit)/, "16 circuits"],
+  [/\b8\b[^,.;]*(branch|circuit)/, "8 circuits"],
+  [/high(er)? kaic|high interrupting/, "higher kaic"],
+  [/input breaker|main breaker/, "standard kaic"],
+  [/output breaker/, "main output breaker"],
+  [/shunt/, "shunt trip"],
+  [/ground fault|\bgfp\b/, "ground fault"],
+  [/lockable|lock.?out/, "lockable"],
+  [/wrap.?around|external bypass/, "wraparound"],
+  [/bypass/, "internal manual bypass"],
+  [/heater|cold weather/, "heater"],
+  [/battery disconnect|dc disconnect/, "battery disconnect"],
+  [/seismic|oshpd/, "seismic battery rack"],
+  [/spill/, "spill containment"],
+  [/\+ ?120|120 more|extra 120/, "+120 min"],
+  [/add.?on battery|extra battery cabinet|\+ ?60|60 more/, "+60 min"],
+  [/65 ?kaic|65,?000/, "65 kaic"],
+  [/22 ?kaic|22,?000/, "22 kaic"],
+  [/nema ?3r|outdoor|rainproof/, "nema 3r"],
+  [/nema ?4x|stainless/, "nema 4x"],
+  [/nema ?12|dust/, "nema 12"],
+  [/wall.?mount/, "wall-mount"],
+  [/caster|floor stand/, "floor stand"],
+  [/custom paint|paint color/, "custom paint"],
+  [/anchor/, "anchoring"],
+  [/100 ?ka\b/, "100 ka"],
+  [/surge|tvss|\bspd\b/, "50 ka"],
+  [/(4|four)[- ]zone/, "4 zones"],
+  [/\blcr\b|load control|control relay/, "1 zone"],
+  [/dimm|0.?10 ?v/, "dimming"],
+  [/witness/, "witness"],
+  [/load bank/, "load bank"],
+  [/submittal/, "submittal"],
+  [/5.?(yr|year) (extended )?warranty|warranty[^,.;]*5/, "5 years"],
+  [/2.?(yr|year) (extended )?warranty|warranty[^,.;]*2/, "2 years"],
+  [/battery warranty/, "prorated battery"],
+  [/spare fuse|fuse kit/, "fuse"],
+  [/spare (control )?board/, "control board"],
+  [/spare batter/, "spare battery"],
+  [/after.?hours|weekend/, "after-hours"],
+  [/start.?up|commission/, "start-up and commissioning"],
+  [/preventive|maintenance (plan|visit|contract)/, "preventive"],
+  [/battery replacement/, "replacement labor"],
+  [/delta/, "delta"],
+  [/frequency conv|60 ?hz in/, "conversion"],
+  [/50 ?hz/, "50 hz output"],
+];
+
+const parseKw = (t) => {
+  const m = t.match(/(\d+(?:\.\d+)?)\s*-?\s*(?:k\s?w|kva|kilowatt|kilo)/);
+  return m ? Number(m[1]) : null;
+};
+
+function capsOf(p) {
+  const a = axesOf(p).find((x) => x.role === "capacity");
+  return a ? valuesOf(a) : [];
+}
+
+/** Pick the product line that best fits the request. */
+function pickProduct(text) {
+  const t = text.toLowerCase();
+  const products = db.products.filter((p) => db.units.some((u) => u.productId === p.id));
+  for (const p of products) {
+    for (const c of db.companies) {
+      const n = p.names[c.id]?.name?.toLowerCase();
+      if (n && t.includes(n)) return p;
+    }
+  }
+  // The product type named in the request wins; NEMA 3R alone is an enclosure option, not the outdoor line.
+  const groupWords = [
+    [/lighting|ul ?924|egress/, "Emergency Lighting"],
+    [/fire alarm|1481/, "Fire Alarm"],
+    [/elevator|lift/, "Elevator"],
+    [/\bups\b|1778/, "UPS"],
+    [/traffic|telecom/, "Traffic"],
+    [/outdoor (battery|backup|unit|inverter)/, "Outdoor"],
+    [/medical|hospital isolation/, "Medical"],
+    [/isolation transformer/, "Isolation"],
+    [/regulator/, "Voltage Regulators"],
+    [/distribution panel/, "Power Distribution"],
+  ];
+  const group = groupWords.find(([re]) => re.test(t))?.[1] ?? "Emergency Lighting";
+  let cands = products.filter((p) => byId(db.groups, p.groupId).name.includes(group));
+  const narrow = (fn) => {
+    const next = cands.filter(fn);
+    if (next.length) cands = next;
+  };
+  const three = /3[\s-]?(phase|ph)\b|three[\s-]?phase/.test(t);
+  narrow((p) => (p.phase === 3) === three);
+  const seismic = /seismic|oshpd/.test(t);
+  narrow((p) => /seismic|oshpd/i.test(p.names[parent().id]?.name ?? "") === seismic);
+  if (/micro|wall/.test(t)) narrow((p) => /micro|wall/i.test(p.names[parent().id]?.name ?? ""));
+  const kw = parseKw(t);
+  if (kw) {
+    narrow((p) => capsOf(p).some((v) => Math.abs(parseFloat(v.label) - kw) < 0.01));
+    narrow((p) => capsOf(p).some((v) => parseFloat(v.label) >= kw));
+  }
+  return cands[0] ?? products[0];
+}
+
+function matchVoltage(values, n) {
+  return values.find((v) => v.label === n) ?? values.find((v) => v.label.startsWith(n));
+}
+
+/** Apply a request to the configurator state for product p. Returns what was set and what wasn't. */
+function applyRequest(p, text) {
+  const t = " " + text.toLowerCase().replace(/[–—]/g, "-") + " ";
+  const set = [];
+  const missed = [];
+  const axes = axesOf(p);
+  const axis = (role) => axes.find((a) => a.role === role);
+
+  const kw = parseKw(t);
+  if (kw && axis("capacity")) {
+    const caps = valuesOf(axis("capacity"));
+    const exact = caps.find((v) => Math.abs(parseFloat(v.label) - kw) < 0.01);
+    const up = caps.filter((v) => parseFloat(v.label) >= kw).sort((a, b) => parseFloat(a.label) - parseFloat(b.label))[0];
+    const pickCap = exact ?? up;
+    if (pickCap) {
+      cfg.values[axis("capacity").id] = pickCap.id;
+      set.push(`Capacity ${pickCap.label}${exact ? "" : ` (next size up from ${kw})`}`);
+    } else missed.push(`${kw} capacity (largest is ${caps.at(-1)?.label})`);
+  }
+
+  // Voltages: "277 in 120 out", "input 480 output 277", "277 to 120", "120 volt".
+  let vin = t.match(/(\d{3})\s*v?(?:olts?)?\s*(?:in\b|input)/)?.[1] ?? t.match(/input\s*(?:of\s*|voltage\s*)?(\d{3})/)?.[1];
+  let vout = t.match(/(\d{3})\s*v?(?:olts?)?\s*(?:out\b|output)/)?.[1] ?? t.match(/output\s*(?:of\s*|voltage\s*)?(\d{3})/)?.[1];
+  const pair = t.match(/(\d{3})\s*v?\s*(?:to|->|→|into)\s*(\d{3})/);
+  if (pair) {
+    vin ??= pair[1];
+    vout ??= pair[2];
+  }
+  const single = t.match(/(\d{3})\s*v(?:olts?)?\b/);
+  if (!vin && !vout && single) vin = vout = single[1];
+  if (vin && !vout && !pair) vout = vin;
+  if (axis("input") && vin) {
+    const v = matchVoltage(valuesOf(axis("input")), vin);
+    if (v) (cfg.values[axis("input").id] = v.id), set.push(`Input ${v.label} V`);
+    else missed.push(`${vin} V input`);
+  }
+  if (axis("output")) {
+    const outs = valuesOf(axis("output"));
+    const multi = /multi|120\/240|multiple output/.test(t) ? outs.find((v) => v.label.includes(",")) : null;
+    const v = multi ?? (vout ? matchVoltage(outs, vout) : null);
+    if (v) (cfg.values[axis("output").id] = v.id), set.push(`Output ${v.label} V`);
+    else if (vout) missed.push(`${vout} V output`);
+  }
+
+  // Battery: runtime and type.
+  const hours = t.match(/(\d(?:\.\d)?)\s*(?:hr|hour)/);
+  const minutes = t.match(/(\d{2,3})\s*-?\s*min/);
+  const runtime = minutes ? Number(minutes[1]) : hours ? Math.round(Number(hours[1]) * 60) : null;
+  const type = /lithium|li-?ion|\blfp\b|lifepo/.test(t) ? "lithium" : /nicd|nickel/.test(t) ? "nickel" : /10.?(yr|year) (battery|design|vrla)|10.?year life/.test(t) ? "10-year" : /vrla|lead.?acid|sealed/.test(t) ? "vrla" : null;
+  if (runtime || type) {
+    const capAxis = axis("capacity");
+    const cap = capAxis ? cfg.values[capAxis.id] : null;
+    const list = db.batteries.filter((b) => b.productId === p.id && (b.capacityValueId == null || !cap || b.capacityValueId === cap));
+    const fits = list.filter((b) => (!runtime || parseInt(b.runtime) === runtime) && (!type || b.batteryType.toLowerCase().includes(type)));
+    const pick = fits[0] ?? list.filter((b) => !runtime || parseInt(b.runtime) === runtime)[0];
+    if (pick) {
+      cfg.battery = String(pick.id);
+      set.push(`Battery ${pick.runtime}, ${pick.batteryType}`);
+      if (!fits.length && type) missed.push(`${type} battery at ${runtime} min`);
+    } else if (list.length) missed.push(`battery ${runtime ? runtime + " min" : ""} ${type ?? ""}`.trim());
+  }
+
+  // Options.
+  const subs = db.subOptions.filter((s) => s.itemId && db.optionGroups.some((g) => g.id === s.groupId && g.productId === p.id));
+  const taken = new Set();
+  for (const [re, name] of OPTION_RULES) {
+    if (!re.test(t)) continue;
+    const s = subs.find((x) => x.name.toLowerCase().includes(name));
+    if (!s) {
+      missed.push(name);
+      continue;
+    }
+    const key = `${s.groupId}|${s.category}`;
+    if (taken.has(key)) continue;
+    taken.add(key);
+    cfg.picks[key] = String(s.id);
+    set.push(s.name);
+  }
+  return { set, missed };
+}
+
+function assistantBox({ quoteId = null, productId = null }) {
+  const key = quoteId ? `q${quoteId}` : `p${productId}`;
+  const log = chats[key] ?? [];
+  const msgs = log.length
+    ? log.map((m) => `<div class="msg ${m.from}">${m.html}</div>`).join("")
+    : `<div class="msg bot">Tell me what the customer needs, for example: <i>“10 kW lighting inverter, 277 in 120 out, 120 minute lithium battery, BACnet, automatic self-test, NEMA 3R, start-up”</i>. I'll pick the product and fill in the choices below. You can change anything with the dropdowns.</div>`;
+  return `<div class="assistant">
+    <div class="chat">${msgs}</div>
+    <form data-form="assist" data-quote="${quoteId ?? ""}" data-product="${productId ?? ""}" class="row">
+      <label class="field" style="flex:1 1 260px"><span class="sr">Request</span><input name="text" required placeholder="Describe the unit, battery and options…" autocomplete="off"></label>
+      <button class="btn primary">Apply</button>
+    </form>
+  </div>`;
+}
+
+function runAssistant(form, fd) {
+  const text = String(fd.get("text") || "").trim();
+  if (!text) return;
+  const quote = form.dataset.quote ? byId(db.quotes, form.dataset.quote) : null;
+  const key = quote ? `q${quote.id}` : `p${form.dataset.product}`;
+  const log = (chats[key] ??= []);
+  log.push({ from: "me", html: esc(text) });
+
+  let p = form.dataset.product ? byId(db.products, form.dataset.product) : null;
+  let picked = false;
+  if (quote) {
+    const current = Number(ui[`q${quote.id}product`]) || null;
+    const chosen = current ? byId(db.products, current) : null;
+    const suggested = pickProduct(text);
+    p = chosen && !/fire alarm|elevator|\bups\b|traffic|telecom|outdoor|medical|isolation|regulator|distribution|seismic|3.?phase|micro|wall/i.test(text) ? chosen : suggested;
+    picked = !chosen || chosen.id !== p.id;
+    ui[`q${quote.id}product`] = String(p.id);
+  }
+  if (cfg.productId !== p.id || picked) cfg = { productId: p.id, companyId: quote ? quote.sellerId : cfg.companyId ?? parent().id, values: {}, battery: "", picks: {} };
+  const { set, missed } = applyRequest(p, text);
+  const sellerId = quote ? quote.sellerId : cfg.companyId;
+  const lines = [];
+  if (picked) lines.push(`Product: <b>${esc(productTitle(p, sellerId))}</b>`);
+  if (set.length) lines.push(`Set: ${set.map(esc).join(" · ")}`);
+  const unit = findUnit(p);
+  if (unit) lines.push(`Unit <span class="mono">${esc(itemOf(unit.itemId).companies[sellerId]?.partNumber)}</span>${transformerNote(p) ? ` · ${transformerNote(p)}` : ""}`);
+  else if (axesOf(p).every((a) => cfg.values[a.id])) {
+    // Say which outputs are listed for this capacity and input, so the next try works.
+    const ax = (role) => axesOf(p).find((a) => a.role === role);
+    const fits = db.units.filter((u) => u.productId === p.id && u.valueIds.includes(cfg.values[ax("capacity").id]) && u.valueIds.includes(cfg.values[ax("input").id]));
+    const outs = [...new Set(fits.flatMap((u) => u.valueIds.map((v) => byId(db.axisValues, v)).filter((v) => v.axisId === ax("output").id).map((v) => v.label)))];
+    lines.push(outs.length ? `That combination isn't a listed unit. With this capacity and input, the listed outputs are: ${outs.map(esc).join(" · ")}.` : "That capacity and input aren't a listed unit. Try another input voltage.");
+  }
+  else lines.push(`Still needed: ${axesOf(p).filter((a) => !cfg.values[a.id]).map((a) => a.name.toLowerCase()).join(", ")}.`);
+  if (missed.length) lines.push(`Not available on this product: ${missed.map(esc).join(", ")}.`);
+  log.push({ from: "bot", html: lines.join("<br>") });
+}
+
+function findUnit(p) {
+  const axes = axesOf(p);
+  const chosen = axes.map((a) => cfg.values[a.id]).filter(Boolean);
+  if (chosen.length !== axes.length) return null;
+  return db.units.find((u) => u.productId === p.id && chosen.every((v) => u.valueIds.includes(v))) ?? null;
+}
+
+/** Transformer is automatic: required whenever input and output voltage differ. */
+function transformerNote(p) {
+  const inA = axesOf(p).find((a) => a.role === "input");
+  const outA = axesOf(p).find((a) => a.role === "output");
+  const vin = inA && byId(db.axisValues, cfg.values[inA.id]);
+  const vout = outA && byId(db.axisValues, cfg.values[outA.id]);
+  if (!vin || !vout) return "";
+  const unitPn = db.items.find((i) => db.units.some((u) => u.productId === p.id && u.itemId === i.id))?.companies[parent().id]?.partNumber ?? "";
+  if (!/[NT]1$/.test(unitPn)) return "";
+  return vin.label.trim() === vout.label.trim() ? "No transformer needed (N1)" : "Transformer required, input and output differ (T1)";
+}
+
 // ── Configurator (product page and quote builder) ──────────────
 
 function configurator(p, { quote } = {}) {
@@ -430,6 +713,7 @@ function configurator(p, { quote } = {}) {
         ),
       )
       .join("")}
+    ${transformerNote(p) ? `<div class="txnote">${transformerNote(p)}</div>` : ""}
     ${sel(
       "battery",
       "Battery",
@@ -687,7 +971,14 @@ function crmView([page, id]) {
 }
 
 const territoryNo = (id) => byId(db.territories, id)?.number ?? "—";
+const territoryLabel = (id) => {
+  const t = byId(db.territories, id);
+  return t ? `${t.number} · ${t.name}` : "—";
+};
 const typeName = (id) => byId(db.companyTypes, id)?.name ?? "";
+// Until sales orders exist, a won quote counts as an order.
+const ordersOf = (customerId) => db.quotes.filter((x) => x.customerId === customerId && x.status === "won");
+const orderNo = (id) => `SO-${String(id).padStart(5, "0")}`;
 
 function companiesListView() {
   const q = ui.crmQ.trim().toLowerCase();
@@ -697,37 +988,34 @@ function companiesListView() {
     .filter((c) => !q || c.name.toLowerCase().includes(q) || db.contacts.some((p) => p.companyId === c.id && (p.name + " " + p.email).toLowerCase().includes(q)))
     .sort((a, b) => territoryNo(a.territoryId) - territoryNo(b.territoryId) || a.name.localeCompare(b.name));
   const rows = list
-    .map((c) => {
-      const quotes = db.quotes.filter((x) => x.customerId === c.id);
-      const last = quotes.map((x) => x.at).sort().pop();
-      const people = db.contacts.filter((p) => p.companyId === c.id && p.active).length;
-      return `<tr class="click s-${c.status}" data-go="#/crm/company/${c.id}"><td class="num">${territoryNo(c.territoryId)}</td><td><a href="#/crm/company/${c.id}" style="color:inherit"><b>${esc(c.name)}</b></a>${c.focus ? `<div class="muted" style="font-size:12.5px">${esc(c.focus)}</div>` : ""}</td><td>${esc(typeName(c.typeId))}</td><td>${esc([c.city, c.state].filter(Boolean).join(", "))}</td><td class="num">${people}</td><td class="num">${quotes.length}</td><td class="num">${last ? shortDate(last) : ""}</td></tr>`;
-    })
+    .map(
+      (c) =>
+        `<tr class="click" data-go="#/crm/company/${c.id}"><td style="white-space:nowrap">${esc(territoryLabel(c.territoryId))}</td><td><a href="#/crm/company/${c.id}"><b>${esc(c.name)}</b></a></td><td>${esc(typeName(c.typeId))}</td></tr>`,
+    )
     .join("");
-  const legend = `<div class="chips legend" style="margin-bottom:12px">${["engineer_spec", "sales_progress", "late", "no_activity", "non_performing"]
-    .map((s) => `<span class="s-${s}" style="background:var(--s-${{ engineer_spec: "spec", sales_progress: "progress", late: "late", no_activity: "none", non_performing: "bad" }[s]})">${STATUS[s]}</span>`)
-    .join("")}</div>`;
   return `
     ${pageHead("Companies")}
     <div class="grid side">
       ${card(
         "",
-        `<form data-form="crmFilter" class="row" style="margin-bottom:10px">
-          <label class="field" style="flex:0 1 170px"><span>Territory</span><select name="territory"><option value="">All</option>${db.territories.map((t) => `<option value="${t.id}" ${Number(ui.crmTerritory) === t.id ? "selected" : ""}>${t.number}${t.name ? " · " + esc(t.name) : ""}</option>`).join("")}</select></label>
-          <label class="field" style="flex:0 1 170px"><span>Company type</span><select name="type"><option value="">All</option>${db.companyTypes.map((t) => `<option value="${t.id}" ${Number(ui.crmType) === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
-          <label class="field"><span>Search</span><input name="q" value="${esc(ui.crmQ)}" placeholder="Company, contact name or email"></label>
+        `<form data-form="crmFilter" class="row" style="margin-bottom:14px">
+          <label class="field" style="flex:0 1 260px"><span>Territory (NEMRA)</span><select name="territory"><option value="">All</option>${db.territories
+            .filter((t) => db.customers.some((c) => c.territoryId === t.id))
+            .map((t) => `<option value="${t.id}" ${Number(ui.crmTerritory) === t.id ? "selected" : ""}>${t.number} · ${esc(t.name)}</option>`)
+            .join("")}</select></label>
+          <label class="field" style="flex:0 1 190px"><span>Company type</span><select name="type"><option value="">All</option>${db.companyTypes.map((t) => `<option value="${t.id}" ${Number(ui.crmType) === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
+          <label class="field"><span>Search</span><input name="q" value="${esc(ui.crmQ)}" placeholder="Company, employee name or email"></label>
           <button class="btn secondary">Filter</button>
-        </form>${legend}` +
-          (rows ? table("<th class='num'>Territory</th><th>Company</th><th>Type</th><th>City</th><th class='num'>Contacts</th><th class='num'>Quotes</th><th class='num'>Last quote</th>", rows) : `<div class="empty">No companies match.</div>`) +
+        </form>` +
+          (rows ? table("<th>Territory</th><th>Company</th><th>Type</th>", rows) : `<div class="empty">No companies match.</div>`) +
           `<p class="hint" style="margin:10px 0 0">${list.length} companies</p>`,
       )}
       ${card(
         "New company",
         `<form data-form="newCompany" class="stack">
           <label class="field"><span>Company name</span><input name="name" required></label>
-          <div class="row"><label class="field"><span>Territory</span><select name="territory">${db.territories.map((t) => `<option value="${t.id}">${t.number}</option>`).join("")}</select></label>
-          <label class="field"><span>Type</span><select name="type">${db.companyTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label></div>
-          <div class="row"><label class="field"><span>City</span><input name="city"></label><label class="field" style="flex:0 0 70px"><span>State</span><input name="state" maxlength="2"></label></div>
+          <label class="field"><span>Territory</span><select name="territory">${db.territories.map((t) => `<option value="${t.id}">${t.number} · ${esc(t.name)}</option>`).join("")}</select></label>
+          <label class="field"><span>Type</span><select name="type">${db.companyTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select></label>
           <button class="btn primary">Create company</button>
         </form>`,
       )}
@@ -739,89 +1027,138 @@ function companyView(id) {
   if (!c) return `<div class="empty">Not found.</div>`;
   const people = db.contacts.filter((p) => p.companyId === id).sort((a, b) => b.active - a.active || a.name.localeCompare(b.name));
   const quotes = db.quotes.filter((x) => x.customerId === id).sort((a, b) => b.at.localeCompare(a.at));
-  const total = quotes.reduce((s, x) => s + quoteTotal(x.id), 0);
-  const active = quotes.filter((x) => x.status === "draft" || x.status === "sent").length;
+  const orders = ordersOf(id).sort((a, b) => b.at.localeCompare(a.at));
+  const open = quotes.filter((x) => x.status === "draft" || x.status === "sent");
+  const quoted = quotes.reduce((s, x) => s + quoteTotal(x.id), 0);
+  const ordered = orders.reduce((s, x) => s + quoteTotal(x.id), 0);
+  const notes = db.notes.filter((n) => n.companyId === id);
+  const lastActivity = [...notes.map((n) => n.at), ...quotes.map((x) => x.at)].sort().pop();
+  const tab = ui.companyTab || "activity";
 
-  const quotesCard = card(
-    `Quotes <span class="muted" style="font-weight:400">· ${active} active of ${quotes.length} · ${moneyText(total)}</span>`,
-    `<form data-form="newQuote" data-customer="${id}" class="row" style="margin-bottom:14px">
-      <label class="field" style="flex:0 1 110px"><span>Quote from</span><select name="seller">${db.companies.map((x) => `<option value="${x.id}">${esc(x.code)}</option>`).join("")}</select></label>
-      <label class="field"><span>Private label pricing</span><select name="label"><option value="">None (standard price)</option>${db.privateLabels.map((l) => `<option value="${l.id}" ${quotes[0]?.privateLabelId === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
-      <label class="field"><span>Contact</span><select name="contact"><option value="">—</option>${people.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
-      <label class="field"><span>Project</span><input name="project" placeholder="Job name"></label>
-      <button class="btn primary">New quote</button>
-    </form>` + (quotes.length ? quotesTable(quotes, false) : `<div class="empty">No quotes yet.</div>`),
-  );
+  const stat = (label, value, sub = "") => `<div class="stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ""}</div>`;
+  const stats = `<div class="stats">
+    ${stat("Quotes", quotes.length, `${moneyText(quoted)} quoted`)}
+    ${stat("Open quotes", open.length, `${moneyText(open.reduce((s, x) => s + quoteTotal(x.id), 0))}`)}
+    ${stat("Orders", orders.length, `${moneyText(ordered)} ordered`)}
+    ${stat("Employees", people.filter((p) => p.active).length, `${people.length - people.filter((p) => p.active).length} inactive`)}
+    ${stat("Last activity", lastActivity ? shortDate(lastActivity) : "—", lastActivity ? daysAgoText(lastActivity) : "")}
+  </div>`;
 
-  const contactRows = people
-    .map((p) => {
-      const f = `c${p.id}`;
-      return `<tr style="${p.active ? "" : "opacity:.5"}"><td><input form="${f}" name="name" value="${esc(p.name)}" required style="min-width:140px"></td><td><input form="${f}" name="title" value="${esc(p.title)}" style="min-width:140px"></td><td><input form="${f}" name="email" value="${esc(p.email)}" style="min-width:190px"></td><td><input form="${f}" name="phone" value="${esc(p.phone)}" style="min-width:120px"></td><td style="text-align:center"><input form="${f}" type="checkbox" name="active" ${p.active ? "checked" : ""} style="width:16px;height:16px;accent-color:var(--brand)" aria-label="Active"></td><td style="white-space:nowrap"><button class="btn secondary sm" data-act="noteFilter" data-v="${p.id}">Notes</button> <form id="${f}" data-form="contact" data-contact="${p.id}" style="display:inline"><button class="btn secondary sm">Save</button></form></td></tr>`;
-    })
-    .join("");
-  const contactsCard = card(
-    `Contacts (${people.length})`,
-    table(
-      "<th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th>Active</th><th></th>",
-      contactRows +
-        `<tr style="background:#f8f9f7"><td><input form="cnew" name="name" placeholder="New contact" required></td><td><input form="cnew" name="title" placeholder="Title"></td><td><input form="cnew" name="email" placeholder="Email"></td><td><input form="cnew" name="phone" placeholder="Phone"></td><td></td><td><form id="cnew" data-form="newContact" data-company="${id}"><button class="btn primary sm">Add</button></form></td></tr>`,
-    ),
-  );
+  const tabs = [
+    ["activity", "Activity"],
+    ["quotes", `Quotes (${quotes.length})`],
+    ["orders", `Orders (${orders.length})`],
+    ["employees", `Employees (${people.length})`],
+    ["details", "Details"],
+  ];
+  const tabNav = `<nav class="subnav" style="margin:22px 0 16px">${tabs.map(([k, l]) => `<a href="#" data-act="companyTab" data-v="${k}" class="${k === tab ? "on" : ""}">${l}</a>`).join("")}</nav>`;
 
-  const f = ui.noteFilter;
-  const notes = db.notes
-    .filter((n) => n.companyId === id)
-    .filter((n) => !f || (f === "company" ? n.contactId == null : n.contactId === Number(f)))
-    .sort((a, b) => b.at.localeCompare(a.at));
-  const chips = [["", "All"], ["company", "Company only"], ...people.map((p) => [String(p.id), p.name])]
-    .map(([k, l]) => `<button class="chip ${String(f) === k ? "on" : ""}" data-act="noteFilter" data-v="${k}">${esc(l)}</button>`)
-    .join("");
-  const notesCard = card(
-    "Notes",
-    `<form data-form="note" data-company="${id}" class="stack" style="margin-bottom:12px">
-      <textarea name="body" rows="3" required placeholder="Write a note…" aria-label="Note"></textarea>
-      <div class="row"><label class="field" style="flex:0 1 220px"><span>About</span><select name="contact"><option value="">Whole company</option>${people.map((p) => `<option value="${p.id}" ${String(f) === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
-      <label class="field" style="flex:0 1 140px"><span>Type</span><select name="kind">${["note", "call", "email", "meeting", "visit"].map((k) => `<option value="${k}">${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}</select></label>
-      <button class="btn primary">Add note</button></div>
-    </form>
-    <div class="chips" style="margin-bottom:8px">${chips}</div>` +
-      (notes.length
-        ? notes
-            .map((n) => {
-              const who = n.contactId ? byId(db.contacts, n.contactId)?.name : null;
-              return `<div style="padding:10px 0;border-top:1px solid #eef0ed"><div class="muted" style="font-size:12.5px;margin-bottom:3px"><span class="badge" style="${who ? "background:var(--brand-soft);color:var(--brand-dark)" : ""}">${esc(who ?? "Company")}</span> ${esc(n.kind[0].toUpperCase() + n.kind.slice(1))} · ${dateTime(n.at)}</div><div>${esc(n.body)}</div></div>`;
-            })
-            .join("")
-        : `<div class="empty">No notes yet.</div>`),
-  );
+  let body = "";
+  if (tab === "activity") {
+    const f = ui.noteFilter;
+    const events = [
+      ...notes.filter((n) => !f || (f === "company" ? n.contactId == null : n.contactId === Number(f))).map((n) => ({ at: n.at, kind: n.kind, who: n.contactId ? byId(db.contacts, n.contactId)?.name : null, text: esc(n.body) })),
+      ...(f ? [] : quotes.map((x) => ({ at: x.at, kind: x.status === "won" ? "order" : "quote", who: byId(db.contacts, x.contactId)?.name ?? null, text: `${x.status === "won" ? "Order" : "Quote"} <a href="#/quote/${x.id}" class="mono">${x.status === "won" ? orderNo(x.id) : quoteNo(x.id)}</a> · ${esc(x.project)} · ${moneyText(quoteTotal(x.id))} ${statusBadge(x.status)}` }))),
+    ].sort((a, b) => b.at.localeCompare(a.at));
+    const chips = [["", "Everything"], ["company", "Company notes"], ...people.map((p) => [String(p.id), p.name])]
+      .map(([k, l]) => `<button class="chip ${String(f) === k ? "on" : ""}" data-act="noteFilter" data-v="${k}">${esc(l)}</button>`)
+      .join("");
+    body = `<div class="grid side">
+      ${card(
+        "",
+        `<div class="chips" style="margin-bottom:6px">${chips}</div>` +
+          (events.length
+            ? `<ol class="timeline">${events
+                .map((e) => `<li><span class="when">${shortDate(e.at)}</span><span class="kind k-${e.kind}">${esc(e.kind[0].toUpperCase() + e.kind.slice(1))}</span><div>${e.who ? `<b>${esc(e.who)}</b> · ` : ""}${e.text}</div></li>`)
+                .join("")}</ol>`
+            : `<div class="empty">No activity yet.</div>`),
+      )}
+      ${card(
+        "Add a note",
+        `<form data-form="note" data-company="${id}" class="stack">
+          <label class="field"><span>About</span><select name="contact"><option value="">Whole company</option>${people.map((p) => `<option value="${p.id}" ${String(f) === String(p.id) ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+          <label class="field"><span>Type</span><select name="kind">${["note", "call", "email", "meeting", "visit"].map((k) => `<option value="${k}">${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}</select></label>
+          <textarea name="body" rows="4" required placeholder="What happened?" aria-label="Note"></textarea>
+          <button class="btn primary">Add note</button>
+        </form>`,
+      )}
+    </div>`;
+  } else if (tab === "quotes") {
+    body = card("", quotes.length ? quotesTable(quotes, false) : `<div class="empty">No quotes yet.</div>`);
+  } else if (tab === "orders") {
+    body = card(
+      "",
+      `<p class="hint">Won quotes, until sales orders are built.</p>` +
+        (orders.length
+          ? table(
+              "<th>Order</th><th>Date</th><th>Project</th><th>From quote</th><th class='num'>Total</th>",
+              orders.map((x) => `<tr class="click" data-go="#/quote/${x.id}"><td class="mono">${orderNo(x.id)}</td><td class="num">${shortDate(x.at)}</td><td>${esc(x.project)}</td><td class="mono"><a href="#/quote/${x.id}">${quoteNo(x.id)}</a></td><td class="num">${moneyText(quoteTotal(x.id))}</td></tr>`).join(""),
+            )
+          : `<div class="empty">No orders yet.</div>`),
+    );
+  } else if (tab === "employees") {
+    const rows = people
+      .map((p) => {
+        const f = `c${p.id}`;
+        const n = notes.filter((x) => x.contactId === p.id).length;
+        const q = quotes.filter((x) => x.contactId === p.id).length;
+        return `<tr style="${p.active ? "" : "opacity:.5"}"><td><input form="${f}" name="name" value="${esc(p.name)}" required style="min-width:140px"></td><td><input form="${f}" name="title" value="${esc(p.title)}" style="min-width:150px"></td><td><input form="${f}" name="email" value="${esc(p.email)}" style="min-width:200px"></td><td><input form="${f}" name="phone" value="${esc(p.phone)}" style="min-width:120px"></td><td class="num">${q}</td><td class="num"><a href="#" data-act="personActivity" data-v="${p.id}">${n}</a></td><td style="text-align:center"><input form="${f}" type="checkbox" name="active" ${p.active ? "checked" : ""} style="width:16px;height:16px;accent-color:var(--brand)" aria-label="Active"></td><td><form id="${f}" data-form="contact" data-contact="${p.id}"><button class="btn secondary sm">Save</button></form></td></tr>`;
+      })
+      .join("");
+    body = card(
+      "",
+      table(
+        "<th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th class='num'>Quotes</th><th class='num'>Notes</th><th>Active</th><th></th>",
+        rows +
+          `<tr style="background:#f8f9f7"><td><input form="cnew" name="name" placeholder="New employee" required></td><td><input form="cnew" name="title" placeholder="Title"></td><td><input form="cnew" name="email" placeholder="Email"></td><td><input form="cnew" name="phone" placeholder="Phone"></td><td></td><td></td><td></td><td><form id="cnew" data-form="newContact" data-company="${id}"><button class="btn primary sm">Add</button></form></td></tr>`,
+      ),
+    );
+  } else {
+    body = card(
+      "",
+      `<form data-form="company" data-company="${id}" class="stack" style="max-width:560px">
+        <label class="field"><span>Company name</span><input name="name" value="${esc(c.name)}" required></label>
+        <div class="row"><label class="field"><span>Territory (NEMRA)</span><select name="territory">${db.territories.map((t) => `<option value="${t.id}" ${c.territoryId === t.id ? "selected" : ""}>${t.number} · ${esc(t.name)}</option>`).join("")}</select></label>
+        <label class="field"><span>Type</span><select name="type">${db.companyTypes.map((t) => `<option value="${t.id}" ${c.typeId === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label></div>
+        <div class="row"><label class="field"><span>Phone</span><input name="phone" value="${esc(c.phone)}"></label><label class="field"><span>Website</span><input name="website" value="${esc(c.website)}"></label></div>
+        <label class="field"><span>Street</span><input name="street" value="${esc(c.street)}"></label>
+        <div class="row"><label class="field"><span>City</span><input name="city" value="${esc(c.city)}"></label><label class="field" style="flex:0 0 64px"><span>State</span><input name="state" value="${esc(c.state)}"></label><label class="field" style="flex:0 0 90px"><span>Zip</span><input name="zip" value="${esc(c.zip)}"></label></div>
+        <label class="field"><span>Focus</span><input name="focus" value="${esc(c.focus)}"></label>
+        <div><button class="btn primary">Save</button></div>
+      </form>`,
+    );
+  }
 
-  const detail = card(
-    "Company details",
-    `<form data-form="company" data-company="${id}" class="stack">
-      <label class="field"><span>Company name</span><input name="name" value="${esc(c.name)}" required></label>
-      <div class="row"><label class="field"><span>Territory</span><select name="territory">${db.territories.map((t) => `<option value="${t.id}" ${c.territoryId === t.id ? "selected" : ""}>${t.number}${t.name ? " · " + esc(t.name) : ""}</option>`).join("")}</select></label>
-      <label class="field"><span>Type</span><select name="type">${db.companyTypes.map((t) => `<option value="${t.id}" ${c.typeId === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label></div>
-      <label class="field"><span>Status</span><select name="status">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${c.status === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-      <label class="field"><span>Focus</span><input name="focus" value="${esc(c.focus)}"></label>
-      <label class="field"><span>Phone</span><input name="phone" value="${esc(c.phone)}"></label>
-      <label class="field"><span>Website</span><input name="website" value="${esc(c.website)}"></label>
-      <label class="field"><span>Street</span><input name="street" value="${esc(c.street)}"></label>
-      <div class="row"><label class="field"><span>City</span><input name="city" value="${esc(c.city)}"></label><label class="field" style="flex:0 0 64px"><span>State</span><input name="state" value="${esc(c.state)}"></label><label class="field" style="flex:0 0 90px"><span>Zip</span><input name="zip" value="${esc(c.zip)}"></label></div>
-      <button class="btn primary">Save</button>
-    </form>`,
-  );
+  const newQuote = `<form data-form="newQuote" data-customer="${id}" class="row newquote">
+    <label class="field" style="flex:0 1 100px"><span>Quote from</span><select name="seller">${db.companies.map((x) => `<option value="${x.id}">${esc(x.code)}</option>`).join("")}</select></label>
+    <label class="field" style="flex:0 1 200px"><span>Private label</span><select name="label"><option value="">None</option>${db.privateLabels.map((l) => `<option value="${l.id}" ${quotes[0]?.privateLabelId === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
+    <label class="field" style="flex:0 1 180px"><span>Contact</span><select name="contact"><option value="">—</option>${people.filter((p) => p.active).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
+    <label class="field" style="flex:1 1 160px"><span>Project</span><input name="project" placeholder="Job name"></label>
+    <button class="btn primary">New quote</button>
+  </form>`;
 
-  const status = c.status !== "none" ? `<span class="badge s-${c.status}" style="background:var(--s-${{ engineer_spec: "spec", sales_progress: "progress", late: "late", no_activity: "none", non_performing: "bad" }[c.status]})">${STATUS[c.status]}</span>` : "";
   return `
-    ${pageHead(esc(c.name), [["#/crm", "Companies"]], `<div class="chips"><span class="badge" style="background:var(--brand-soft);color:var(--brand-dark)">Territory ${territoryNo(c.territoryId)}</span><span class="badge">${esc(typeName(c.typeId))}</span>${status}</div>`)}
-    <div class="grid side"><div class="grid">${quotesCard}${contactsCard}${notesCard}</div><div>${detail}</div></div>`;
+    ${crumbs([["#/crm", "Companies"]])}
+    <div class="company-head">
+      <h1>${esc(c.name)}</h1>
+      <div class="meta"><span>Territory ${esc(territoryLabel(c.territoryId))}</span><span>${esc(typeName(c.typeId))}</span>${c.city ? `<span>${esc([c.city, c.state].filter(Boolean).join(", "))}</span>` : ""}${c.phone ? `<span>${esc(c.phone)}</span>` : ""}</div>
+    </div>
+    ${stats}
+    ${card("", newQuote)}
+    ${tabNav}
+    ${body}`;
+}
+
+function daysAgoText(d) {
+  const days = Math.round((Date.now() - new Date(d).getTime()) / 86400000);
+  return days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
 }
 
 function crmSettingsView() {
   return `
     ${pageHead("Territories & company types")}
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
-      ${card("Territories", table("<th class='num'>Number</th><th>Name</th><th class='num'>Companies</th>", db.territories.map((t) => `<tr><td class="num"><b>${t.number}</b></td><td>${esc(t.name)}</td><td class="num">${db.customers.filter((c) => c.territoryId === t.id).length}</td></tr>`).join("")))}
+      ${card("Territories (NEMRA)", `<p class="hint">NEMRA's generally accepted electrical-industry territories. NEMRA names them but doesn't number them, so the numbers follow NEMRA's list order.</p>` + table("<th class='num'>No.</th><th>Territory</th><th class='num'>Companies</th>", db.territories.map((t) => `<tr><td class="num"><b>${t.number}</b></td><td>${esc(t.name)}</td><td class="num">${db.customers.filter((c) => c.territoryId === t.id).length}</td></tr>`).join("")))}
       ${card("Company types", table("<th>Type</th><th class='num'>Companies</th>", db.companyTypes.map((t) => `<tr><td>${esc(t.name)}</td><td class="num">${db.customers.filter((c) => c.typeId === t.id).length}</td></tr>`).join("")))}
     </div>`;
 }
@@ -839,7 +1176,7 @@ function quotesTable(quotes, showCustomer) {
       .map((x) => {
         const cust = byId(db.customers, x.customerId);
         const label = x.privateLabelId ? byId(db.privateLabels, x.privateLabelId) : null;
-        return `<tr class="click" data-go="#/quote/${x.id}"><td class="mono"><a href="#/quote/${x.id}">${quoteNo(x.id)}</a></td><td class="num">${shortDate(x.at)}</td>${showCustomer ? `<td>${esc(cust.name)} <span class="muted" style="font-size:12px">${territoryNo(cust.territoryId)}</span></td>` : ""}<td>${esc(x.project)}</td><td>${esc(byId(db.contacts, x.contactId)?.name ?? "")}</td><td style="white-space:nowrap">${esc(byId(db.companies, x.sellerId).code)}${label ? ` <span class="muted" style="font-size:12px">· ${esc(label.name)}</span>` : ""}</td><td>${statusBadge(x.status)}</td><td class="num">${moneyText(quoteTotal(x.id))}</td></tr>`;
+        return `<tr class="click" data-go="#/quote/${x.id}"><td class="mono"><a href="#/quote/${x.id}">${quoteNo(x.id)}</a></td><td class="num">${shortDate(x.at)}</td>${showCustomer ? `<td>${esc(cust.name)}</td>` : ""}<td>${esc(x.project)}</td><td>${esc(byId(db.contacts, x.contactId)?.name ?? "")}</td><td style="white-space:nowrap">${esc(byId(db.companies, x.sellerId).code)}${label ? ` <span class="muted" style="font-size:12px">· ${esc(label.name)}</span>` : ""}</td><td>${statusBadge(x.status)}</td><td class="num">${moneyText(quoteTotal(x.id))}</td></tr>`;
       })
       .join(""),
   );
@@ -901,7 +1238,7 @@ function quoteView([id, sub]) {
         )}
         ${card(
           "Add a configured unit",
-          `<label class="field" style="max-width:420px;margin-bottom:14px"><span>Product</span><select data-act-change="quoteProduct" data-quote="${x.id}"><option value="">Choose a product…</option>${productOptions}</select></label>` +
+          `<h3 class="mini">Quote assistant</h3>${assistantBox({ quoteId: x.id })}<h3 class="mini" style="margin-top:18px">Or choose from the dropdowns</h3><label class="field" style="max-width:420px;margin-bottom:14px"><span>Product</span><select data-act-change="quoteProduct" data-quote="${x.id}"><option value="">Choose a product…</option>${productOptions}</select></label>` +
             (product ? configurator(product, { quote: x }) : `<p class="hint" style="margin:0">Pick a product to configure capacity, voltages, battery and options.</p>`),
         )}
         ${card(
@@ -989,6 +1326,8 @@ const actions = {
   itemType: (d) => ((ui.itemType = d.v), render()),
   quoteStatus: (d) => ((ui.quoteStatus = d.v), render()),
   noteFilter: (d) => ((ui.noteFilter = d.v), render()),
+  companyTab: (d) => ((ui.companyTab = d.v), render()),
+  personActivity: (d) => ((ui.companyTab = "activity"), (ui.noteFilter = d.v), render()),
   addConfigured(d) {
     const x = byId(db.quotes, d.quote);
     const productId = Number(d.product);
@@ -1023,6 +1362,7 @@ const actions = {
 };
 
 const forms = {
+  assist: runAssistant,
   itemPrices(form, fd) {
     const it = itemOf(form.dataset.item);
     for (const c of db.companies) setPrice(it, c.id, numOrNull(fd.get(`p${c.id}`)));
@@ -1086,7 +1426,6 @@ const forms = {
       name: String(fd.get("name")),
       territoryId: Number(fd.get("territory")),
       typeId: Number(fd.get("type")),
-      status: String(fd.get("status")),
       focus: String(fd.get("focus")),
       phone: String(fd.get("phone")),
       website: String(fd.get("website")),
@@ -1193,6 +1532,7 @@ document.addEventListener("change", (e) => {
 
 window.addEventListener("hashchange", () => {
   ui.noteFilter = "";
+  ui.companyTab = "";
   ui.capFilter = "";
   render();
 });
