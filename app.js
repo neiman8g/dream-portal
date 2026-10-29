@@ -1,9 +1,31 @@
 // Click-through demo of the product master, CRM and quoting. Runs entirely in the browser:
-// demo data comes from data.json and changes are kept in this browser's localStorage.
+// demo data comes from data.json and changes are kept in this browser's IndexedDB.
 "use strict";
 
-const KEY = "crm-build-demo-v4";
+const KEY = "crm-build-demo-v6";
 let db;
+
+const store = {
+  open() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open("crm-build-demo", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("kv");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  async run(mode, fn) {
+    const conn = await this.open();
+    return new Promise((resolve, reject) => {
+      const req = fn(conn.transaction("kv", mode).objectStore("kv"));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  get: (k) => store.run("readonly", (os) => os.get(k)),
+  set: (k, v) => store.run("readwrite", (os) => os.put(v, k)),
+  del: (k) => store.run("readwrite", (os) => os.delete(k)),
+};
 
 async function loadFresh() {
   const res = await fetch("data.json", { cache: "no-store" });
@@ -11,15 +33,16 @@ async function loadFresh() {
 }
 async function load() {
   try {
-    const saved = localStorage.getItem(KEY);
-    if (saved) return (db = JSON.parse(saved));
+    const saved = await store.get(KEY);
+    if (saved) return (db = saved);
   } catch {}
   db = await loadFresh();
 }
+let saveTimer;
 function save() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(db));
-  } catch {}
+  // Batch quick successive saves into one write.
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => store.set(KEY, db).catch(() => toast("Couldn't save in this browser; changes last until you reload.")), 150);
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -230,7 +253,13 @@ function groupsView() {
       return `<tr class="click" data-go="#/master/group/${g.id}"><td><a href="#/master/group/${g.id}"><b>${esc(g.name)}</b></a></td><td class="num">${n}</td></tr>`;
     })
     .join("");
-  return pageHead("Product groups") + card("", table("<th>Product group</th><th class='num'>Products</th>", rows));
+  return (
+    pageHead("Product groups") +
+    `<div class="grid side">${card("", table("<th>Product group</th><th class='num'>Products</th>", rows))}${card(
+      "New product group",
+      `<form data-form="newGroup" class="stack"><label class="field"><span>Name</span><input name="name" required placeholder="Central Lighting Inverters UL 924"></label><button class="btn primary">Add group</button></form>`,
+    )}</div>`
+  );
 }
 
 function groupView(id) {
@@ -245,9 +274,21 @@ function groupView(id) {
         .join("")}<td class="num">${units}</td></tr>`;
     })
     .join("");
+  const newProduct = card(
+    "New product in this group",
+    `<form data-form="newProduct" data-group="${id}" class="stack">
+      <p class="hint" style="margin:0">Each company sells it under its own name and part-number prefix.</p>
+      ${db.companies
+        .map((c) => `<div class="row"><label class="field" style="flex:1 1 160px"><span>${coChip(c)} product name</span><input name="n${c.id}" ${c.isParent ? "required" : ""} placeholder="${c.isParent ? "LumaGuard 2" : ""}"></label><label class="field" style="flex:0 0 90px"><span>Prefix</span><input name="x${c.id}" class="mono" placeholder="${c.isParent ? "L2" : ""}"></label></div>`)
+        .join("")}
+      <div class="row"><label class="field" style="flex:0 0 90px"><span>Phase</span><select name="phase"><option>1</option><option>3</option></select></label>
+      <label class="check" style="padding-bottom:8px"><input type="checkbox" name="tx" checked> Battery inverter (adds N1/T1 for the transformer)</label></div>
+      <button class="btn primary">Add product</button>
+    </form>`,
+  );
   return (
     pageHead(esc(g.name), [["#/master", "Product groups"]]) +
-    card("", `<p class="hint">Each product has its own name and part-number prefix for each company.</p>` + table(`<th class="num">Phase</th>${db.companies.map((c) => `<th>${coChip(c)} product</th>`).join("")}<th class="num">Units</th>`, rows))
+    `<div class="grid side">${card("", `<p class="hint">Each product has its own name and part-number prefix for each company.</p>` + (rows ? table(`<th class="num">Phase</th>${db.companies.map((c) => `<th>${coChip(c)} product</th>`).join("")}<th class="num">Units</th>`, rows) : `<div class="empty">No products in this group yet. Add the first one.</div>`))}${newProduct}</div>`
   );
 }
 
@@ -282,21 +323,25 @@ const valuesOf = (axis) => db.axisValues.filter((v) => v.axisId === axis.id);
 
 function setupTab(p) {
   const axes = axesOf(p);
-  const example = (p.names[parent().id]?.prefix || "") + axes.map((a) => valuesOf(a)[0]?.code ?? "").join("");
+  const firstIn = valuesOf(axes.find((a) => a.role === "input") ?? {})[0];
+  const firstOut = valuesOf(axes.find((a) => a.role === "output") ?? {})[0];
+  const tx = usesTransformerSuffix(p) && firstIn && firstOut ? (firstIn.label === firstOut.label ? "N1" : "T1") : "";
+  const example = (p.names[parent().id]?.prefix || "") + axes.map((a) => valuesOf(a)[0]?.code ?? "").join("") + tx;
   const cards = axes
     .map((a) =>
       card(
         esc(a.name),
-        valuesOf(a).length
-          ? table("<th>" + (a.role === "capacity" ? "Capacity (UL listed)" : "Label") + "</th><th>Code</th><th>Suffix</th>", valuesOf(a).map((v) => `<tr><td>${esc(v.label)}</td><td class="mono">${esc(v.code)}</td><td class="mono">${esc(v.suffix)}</td></tr>`).join(""))
-          : `<div class="empty">No values yet.</div>`,
+        (valuesOf(a).length
+          ? table("<th>" + (a.role === "capacity" ? "Capacity (UL listed)" : "Voltage") + "</th><th>Code</th>", valuesOf(a).map((v) => `<tr><td>${esc(v.label)}</td><td class="mono">${esc(v.code)}</td></tr>`).join(""))
+          : `<div class="empty">None yet.</div>`) + addValueForm(a),
       ),
     )
     .join("");
   return `
     ${card("How the part number is built", `<p class="hint">Company prefix, then each segment's code in order. Example for ${esc(parent().code)}:</p><div class="pn-big">${esc(example)}</div>
-      <p class="hint" style="margin-top:10px">${axes.map((a) => esc(a.name)).join(" → ")}. Each company gets the same codes with its own prefix (${db.companies.map((c) => `${esc(c.code)} ${esc(p.names[c.id]?.prefix || "—")}`).join(", ")}).</p>`)}
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:18px">${cards}</div>`;
+      <p class="hint" style="margin-top:10px">${axes.map((a) => esc(a.name)).join(" → ")}${usesTransformerSuffix(p) ? " → N1/T1 (added automatically: T1 when input and output voltages differ)" : ""}. Each company gets the same codes with its own prefix (${db.companies.map((c) => `${esc(c.code)} ${esc(p.names[c.id]?.prefix || "—")}`).join(", ")}).</p>`)}
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-top:18px">${cards}</div>
+    <div style="margin-top:18px">${createUnitsCard(p)}</div>`;
 }
 
 function unitsTab(p) {
@@ -357,7 +402,15 @@ function batteriesTab(p) {
   return card(
     "Batteries",
     `<p class="hint">Batteries are offered per capacity, by runtime and type, each with its own part number for each company.</p>` +
-      table(`<th>Capacity</th><th>Runtime</th><th>Type</th>${db.companies.map((c) => `<th>${coChip(c)} part number</th>`).join("")}<th class="num">Cost</th>${db.companies.map((c) => `<th class="num">${coChip(c)} sell $</th>`).join("")}`, rows),
+      (rows ? table(`<th>Capacity</th><th>Runtime</th><th>Type</th>${db.companies.map((c) => `<th>${coChip(c)} part number</th>`).join("")}<th class="num">Cost</th>${db.companies.map((c) => `<th class="num">${coChip(c)} sell $</th>`).join("")}`, rows) : `<div class="empty">No batteries yet.</div>`) +
+      `<form data-form="newBattery" data-product="${p.id}" class="row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+        <label class="field" style="flex:0 1 140px"><span>Capacity</span><select name="cap"><option value="">All capacities</option>${(axesOf(p).find((a) => a.role === "capacity") ? valuesOf(axesOf(p).find((a) => a.role === "capacity")) : []).map((v) => `<option value="${v.id}">${esc(v.label)}</option>`).join("")}</select></label>
+        <label class="field" style="flex:0 1 110px"><span>Runtime</span><select name="runtime"><option>90 min</option><option>120 min</option><option>180 min</option><option>240 min</option></select></label>
+        <label class="field" style="flex:1 1 170px"><span>Battery type</span><select name="type"><option>VRLA, 5-year</option><option>VRLA, 10-year design life</option><option>Nickel-cadmium (NiCd)</option><option>Lithium iron phosphate</option></select></label>
+        <label class="field" style="flex:1 1 150px"><span>${esc(parent().code)} part number</span><input name="pn" required class="mono" placeholder="7BL-050-090-V5"></label>
+        <label class="field" style="flex:0 1 110px"><span>${esc(parent().code)} price</span><input name="price" inputmode="decimal"></label>
+        <button class="btn primary">Add battery</button>
+      </form>`,
   );
 }
 
@@ -377,9 +430,17 @@ function optionsTab(p) {
               .join("")}</tr>`;
           })
           .join("");
-        return card(`${gi + 1}. ${esc(g.name)}`, subs.length ? table(`<th>Category</th><th>Sub-option</th><th>Assigned part number</th><th class="num">Cost</th>${db.companies.map((c) => `<th class="num">${coChip(c)} sell $</th>`).join("")}`, rows) : `<div class="empty">No sub-options yet.</div>`);
+        const add = `<form data-form="newSubOption" data-group="${g.id}" class="row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+          <label class="field" style="flex:0 1 150px"><span>Category</span><input name="category" placeholder="A. Network" list="cats${g.id}"><datalist id="cats${g.id}">${[...new Set(subs.map((x) => x.category))].map((c) => `<option value="${esc(c)}"></option>`).join("")}</datalist></label>
+          <label class="field" style="flex:1 1 170px"><span>Sub-option</span><input name="name" required placeholder="LonWorks gateway"></label>
+          <label class="field" style="flex:0 1 140px"><span>Part number</span><input name="pn" required class="mono" placeholder="9500-3001-01"></label>
+          ${db.companies.map((c) => `<label class="field" style="flex:0 1 90px"><span>${esc(c.code)} $</span><input name="p${c.id}" inputmode="decimal" placeholder="${c.isParent ? "" : "same"}"></label>`).join("")}
+          <button class="btn primary">Add</button>
+        </form>`;
+        return card(`${gi + 1}. ${esc(g.name)}`, (subs.length ? table(`<th>Category</th><th>Sub-option</th><th>Assigned part number</th><th class="num">Cost</th>${db.companies.map((c) => `<th class="num">${coChip(c)} sell $</th>`).join("")}`, rows) : `<div class="empty">No sub-options yet.</div>`) + add);
       })
       .join("") +
+    card("New option group", `<form data-form="newOptionGroup" data-product="${p.id}" class="row"><label class="field"><span>Name</span><input name="name" required placeholder="Monitoring"></label><button class="btn primary">Add option group</button></form>`) +
     `</div>`
   );
 }
@@ -591,6 +652,18 @@ function applyRequest(p, text) {
     cfg.picks[key] = String(s.id);
     set.push(s.name);
   }
+  // Options added in the product master: match on the distinctive words of their names.
+  const common = new Set(["input", "output", "breaker", "battery", "circuit", "circuits", "years", "standard", "panel", "with", "main", "higher", "extended", "remote", "monthly", "annual", "system", "rating", "enclosure", "transfer", "service", "services", "spare"]);
+  for (const s of subs) {
+    const key = `${s.groupId}|${s.category}`;
+    if (taken.has(key)) continue;
+    const words = s.name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !common.has(w));
+    if (words.some((w) => t.includes(w))) {
+      taken.add(key);
+      cfg.picks[key] = String(s.id);
+      set.push(s.name);
+    }
+  }
   return { set, missed };
 }
 
@@ -665,6 +738,157 @@ function transformerNote(p) {
   if (!/[NT]1$/.test(unitPn)) return "";
   return vin.label.trim() === vout.label.trim() ? "No transformer needed (N1)" : "Transformer required, input and output differ (T1)";
 }
+
+// ── Editing the product master ─────────────────────────────────
+
+/** Does this product put N1/T1 (transformer) at the end of its unit part numbers? */
+function usesTransformerSuffix(p) {
+  if (p.transformerSuffix != null) return p.transformerSuffix;
+  const unit = db.units.find((u) => u.productId === p.id);
+  return unit ? /[NT]1$/.test(itemOf(unit.itemId).companies[parent().id]?.partNumber ?? "") : true;
+}
+
+/** New item with a part number, description and price per company. Reuses the item if the OLP part number exists. */
+function createItem(type, partNumbers, descriptions, prices = []) {
+  const P = parent();
+  const existing = db.items.find((i) => i.companies[P.id]?.partNumber.toUpperCase() === partNumbers[0].toUpperCase());
+  if (existing) return existing;
+  const item = { id: nextId(db.items), type, cost: null, transferPct: null, companies: {} };
+  db.companies.forEach((c, i) => {
+    item.companies[c.id] = { partNumber: partNumbers[i] ?? partNumbers[0], description: descriptions[i] ?? descriptions[0], price: null };
+  });
+  db.items.push(item);
+  db.companies.forEach((c, i) => {
+    const price = prices[i] ?? prices[0] ?? null;
+    if (price != null) setPrice(item, c.id, price, "New item");
+  });
+  return item;
+}
+
+/** Create a unit for every combination of the ticked values. Returns how many were new. */
+function generateUnits(p, pickedValueIds) {
+  const axes = axesOf(p);
+  const perAxis = axes.map((a) => valuesOf(a).filter((v) => pickedValueIds.includes(v.id)));
+  const empty = axes.filter((_, i) => !perAxis[i].length).map((a) => a.name.toLowerCase());
+  if (empty.length) return { error: `Tick at least one ${empty.join(", ")}.` };
+  const combos = perAxis.reduce((acc, list) => acc.flatMap((combo) => list.map((v) => [...combo, v])), [[]]);
+  const role = (combo, r) => combo[axes.findIndex((a) => a.role === r)];
+  let created = 0;
+  for (const combo of combos) {
+    const ids = combo.map((v) => v.id);
+    if (db.units.some((u) => u.productId === p.id && ids.every((id) => u.valueIds.includes(id)) && u.valueIds.length === ids.length)) continue;
+    const vin = role(combo, "input");
+    const vout = role(combo, "output");
+    const tx = usesTransformerSuffix(p) && vin && vout ? (vin.label.trim() === vout.label.trim() ? "N1" : "T1") : "";
+    const code = combo.map((v) => v.code).join("") + tx + combo.map((v) => v.suffix || "").join("");
+    const specs = combo.map((v) => {
+      const a = axes.find((x) => x.id === v.axisId);
+      return a.role === "input" ? `${v.label} V in` : a.role === "output" ? `${v.label} V out` : v.label;
+    }).join(", ") + (tx === "T1" ? ", with transformer" : "");
+    const item = createItem(
+      "unit",
+      db.companies.map((c) => (p.names[c.id]?.prefix ?? "") + code),
+      db.companies.map((c) => `${productTitle(p, c.id)} – ${specs}`),
+    );
+    db.units.push({ id: nextId(db.units), productId: p.id, itemId: item.id, valueIds: ids });
+    created++;
+  }
+  return { created };
+}
+
+const addValueForm = (axis) => `<form data-form="addValue" data-axis="${axis.id}" class="row" style="margin-top:10px">
+  <label class="field" style="flex:1 1 120px"><span>${axis.role === "capacity" ? "New capacity" : "New voltage"}</span><input name="label" required placeholder="${axis.role === "capacity" ? "12.5 KW" : "277"}"></label>
+  <label class="field" style="flex:0 0 90px"><span>Code</span><input name="code" required placeholder="${axis.role === "capacity" ? "012" : "R"}" class="mono"></label>
+  <button class="btn primary">Add</button>
+</form>`;
+
+function createUnitsCard(p) {
+  const axes = axesOf(p);
+  return card(
+    "Create units",
+    `<form data-form="createUnits" data-product="${p.id}" class="stack">
+      <p class="hint" style="margin:0">Tick the values to combine. One unit is created for every combination that doesn't exist yet${usesTransformerSuffix(p) ? "; N1 or T1 is added automatically from the voltages" : ""}. Prices can be filled in on the Units tab.</p>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">${axes
+        .map(
+          (a) =>
+            `<fieldset class="ticks"><legend>${esc(a.name)}</legend>${
+              valuesOf(a).length
+                ? valuesOf(a).map((v) => `<label class="check"><input type="checkbox" name="v" value="${v.id}"> ${esc(v.label)} <span class="mono muted">${esc(v.code)}</span></label>`).join("")
+                : `<span class="muted" style="font-size:13px">Add values first.</span>`
+            }</fieldset>`,
+        )
+        .join("")}</div>
+      <div><button class="btn primary">Create units</button></div>
+    </form>`,
+  );
+}
+
+const editForms = {
+  newGroup(form, fd) {
+    const id = nextId(db.groups);
+    db.groups.push({ id, name: String(fd.get("name")).trim() });
+    save();
+    location.hash = `#/master/group/${id}`;
+  },
+  newProduct(form, fd) {
+    const id = nextId(db.products);
+    const names = {};
+    for (const c of db.companies) names[c.id] = { name: String(fd.get(`n${c.id}`) || "").trim(), prefix: String(fd.get(`x${c.id}`) || "").trim().toUpperCase() };
+    db.products.push({ id, groupId: Number(form.dataset.group), phase: Number(fd.get("phase")) || 1, names, transformerSuffix: fd.get("tx") === "on" });
+    let seq = 10;
+    for (const [role, name] of [["capacity", "Capacity"], ["input", "Input voltage"], ["output", "Output voltage"]]) {
+      db.axes.push({ id: nextId(db.axes), productId: id, role, name, sequence: seq });
+      seq += 10;
+    }
+    save();
+    toast("Product created. Add capacities and voltages next.");
+    location.hash = `#/master/product/${id}/setup`;
+  },
+  addValue(form, fd) {
+    const axis = byId(db.axes, form.dataset.axis);
+    const label = String(fd.get("label")).trim();
+    const code = String(fd.get("code")).trim().toUpperCase();
+    if (valuesOf(axis).some((v) => v.code === code)) return toast(`Code ${code} is already used in ${axis.name.toLowerCase()}.`);
+    db.axisValues.push({ id: nextId(db.axisValues), axisId: axis.id, label, code, suffix: "" });
+    save();
+    toast(`Added ${label}`);
+  },
+  createUnits(form, fd) {
+    const p = byId(db.products, form.dataset.product);
+    const result = generateUnits(p, fd.getAll("v").map(Number));
+    if (result.error) return toast(result.error);
+    save();
+    toast(result.created ? `Created ${result.created} unit${result.created === 1 ? "" : "s"}` : "Those units already exist");
+  },
+  newOptionGroup(form, fd) {
+    db.optionGroups.push({ id: nextId(db.optionGroups), productId: Number(form.dataset.product), name: String(fd.get("name")).trim() });
+    save();
+    toast("Option group added");
+  },
+  newSubOption(form, fd) {
+    const group = byId(db.optionGroups, form.dataset.group);
+    const pn = String(fd.get("pn")).trim().toUpperCase();
+    const name = String(fd.get("name")).trim();
+    const prices = db.companies.map((c) => numOrNull(fd.get(`p${c.id}`)));
+    const item = createItem("option", [pn], [String(fd.get("desc") || name).trim()], prices[0] == null ? [] : prices.map((x) => x ?? prices[0]));
+    db.subOptions.push({ id: nextId(db.subOptions), groupId: group.id, category: String(fd.get("category") || "").trim(), name, itemId: item.id });
+    save();
+    toast(`Added ${name}`);
+  },
+  newBattery(form, fd) {
+    const p = byId(db.products, form.dataset.product);
+    const pn = String(fd.get("pn")).trim().toUpperCase();
+    const runtime = String(fd.get("runtime")).trim();
+    const type = String(fd.get("type")).trim();
+    const cap = byId(db.axisValues, fd.get("cap"));
+    const price = numOrNull(fd.get("price"));
+    const desc = `Battery cabinet${cap ? ` for ${cap.label}` : ""}, ${runtime} runtime, ${type}`;
+    const item = createItem("battery", db.companies.map((c) => (c.isParent ? pn : `${c.code}${pn}`)), [desc], price == null ? [] : [price]);
+    db.batteries.push({ id: nextId(db.batteries), productId: p.id, capacityValueId: cap?.id ?? null, itemId: item.id, runtime, batteryType: type });
+    save();
+    toast("Battery added");
+  },
+};
 
 // ── Configurator (product page and quote builder) ──────────────
 
@@ -1331,7 +1555,7 @@ function repriceQuote(x) {
 const actions = {
   async reset() {
     try {
-      localStorage.removeItem(KEY);
+      await store.del(KEY);
     } catch {}
     db = await loadFresh();
     cfg = { productId: null };
@@ -1393,6 +1617,7 @@ const actions = {
 };
 
 const forms = {
+  ...editForms,
   assist: runAssistant,
   itemPrices(form, fd) {
     const it = itemOf(form.dataset.item);
