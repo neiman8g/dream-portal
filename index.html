@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="The system Online Power wants built for its lighting inverter business: product master, three-company pricing, CRM and quoting.">
+<meta name="robots" content="noindex">
+<title>Online Power Dream Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+html { color-scheme: light; }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+/* Layout: a single reading column with wide screenshot plates; a sticky section bar; amber = emergency-lighting signal. */
+:root {
+  --bg: #f4f5f2;
+  --surface: #ffffff;
+  --ink: #18201f;
+  --muted: #5b6662;
+  --line: #d9ddd7;
+  --accent: #b86e00;
+  --accent-soft: #fbefd9;
+  --teal: #134649;
+  --teal-soft: #e3eeee;
+  --done: #2f7a46;
+  --todo: #8a5a00;
+  --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111615; --surface: #1a2120; --ink: #e8ece9; --muted: #9aa6a1; --line: #2c3634;
+    --accent: #f0a73a; --accent-soft: #3a2a10; --teal: #8fd0cf; --teal-soft: #17302f; --done: #7fd39a; --todo: #f0bf6a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111615; --surface: #1a2120; --ink: #e8ece9; --muted: #9aa6a1; --line: #2c3634;
+  --accent: #f0a73a; --accent-soft: #3a2a10; --teal: #8fd0cf; --teal-soft: #17302f; --done: #7fd39a; --todo: #f0bf6a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 1.0625rem/1.6 var(--body);
+}
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--display); line-height: 1.1; text-wrap: balance; margin: 0; }
+h2 { font-size: clamp(1.6rem, 3.4vw, 2.3rem); font-weight: 800; letter-spacing: -0.01em; }
+h3 { font-size: 1.2rem; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow {
+  font: 600 0.75rem/1 var(--body);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+code, .pn { font-family: var(--mono); font-size: 0.92em; }
+a { color: var(--teal); }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* ── Hero ── */
+.hero { background: var(--teal); color: #f2f7f6; padding-block: clamp(40px, 7vw, 76px) clamp(32px, 5vw, 56px); }
+:root[data-theme="dark"] .hero { color: #0d1514; }
+.hero .eyebrow { color: #ffc46b; }
+.hero h1 { font-size: clamp(2.2rem, 6vw, 4rem); font-weight: 800; letter-spacing: -0.02em; margin-block: 14px 18px; max-width: 18ch; }
+.hero p { font-size: 1.2rem; max-width: 60ch; opacity: 0.92; }
+.companies { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.co { display: flex; align-items: baseline; gap: 8px; padding: 8px 14px; border: 1px solid rgba(255,255,255,0.28); border-radius: 6px; }
+.co b { font: 700 0.95rem var(--mono); color: #ffc46b; }
+.co span { font-size: 0.98rem; }
+.demo-note { margin-top: 26px; font-size: 0.95rem; opacity: 0.8; }
+
+/* ── Section nav ── */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.nav ul { display: flex; gap: 4px; list-style: none; margin: 0; padding-block: 8px; overflow-x: auto; scrollbar-width: none; }
+.nav a { display: block; padding: 6px 12px; border-radius: 999px; font-weight: 600; font-size: 0.95rem; color: var(--muted); text-decoration: none; white-space: nowrap; }
+.nav a:hover { color: var(--ink); background: var(--bg); }
+
+section { padding-block: clamp(44px, 7vw, 80px); border-bottom: 1px solid var(--line); scroll-margin-top: 56px; }
+.head { display: grid; gap: 12px; margin-bottom: 32px; }
+.head p { color: var(--muted); font-size: 1.1rem; }
+
+/* ── Flow ── */
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; counter-reset: step; }
+.step { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 14px 14px; display: grid; gap: 6px; align-content: start; }
+.step::before { counter-increment: step; content: counter(step); font: 700 0.8rem var(--mono); color: var(--muted); }
+.step h3 { font-size: 1.05rem; }
+.step p { font-size: 0.93rem; color: var(--muted); }
+.state { justify-self: start; font: 600 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.08em; padding: 5px 7px; border-radius: 4px; }
+.state.built { color: var(--done); background: color-mix(in srgb, var(--done) 14%, transparent); }
+.state.next { color: var(--todo); background: var(--accent-soft); }
+.today { margin-top: 18px; font-size: 0.95rem; color: var(--muted); }
+
+/* ── Part number anatomy ── */
+.anatomy { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: clamp(18px, 3vw, 28px); display: grid; gap: 18px; }
+.pnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg { display: grid; gap: 6px; text-align: center; }
+.seg b { font: 500 clamp(1.4rem, 4vw, 2.2rem)/1 var(--mono); padding: 12px 14px; border-radius: 6px; background: var(--teal-soft); color: var(--teal); }
+.seg.pre b { background: var(--accent-soft); color: var(--accent); }
+.seg span { font-size: 0.82rem; color: var(--muted); line-height: 1.3; }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.three div { border-top: 3px solid var(--accent); padding-top: 10px; display: grid; gap: 2px; }
+.three b { font-family: var(--display); }
+.three code { color: var(--teal); }
+.three small { color: var(--muted); }
+
+/* ── Feature blocks ── */
+.feature { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: clamp(20px, 4vw, 44px); align-items: start; margin-top: 44px; }
+.feature:first-of-type { margin-top: 0; }
+.feature .copy { display: grid; gap: 12px; position: sticky; top: 80px; }
+.feature ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; color: var(--ink); }
+.feature li::marker { color: var(--accent); }
+.feature li { font-size: 0.98rem; }
+.plates { display: grid; gap: 16px; min-width: 0; }
+figure { margin: 0; display: grid; gap: 8px; }
+.shot { display: block; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); cursor: zoom-in; box-shadow: 0 1px 0 var(--line), 0 12px 28px -18px rgba(10, 30, 28, 0.35); }
+.shot img { display: block; width: 100%; height: auto; max-height: 560px; object-fit: cover; object-position: top; }
+figcaption { font-size: 0.9rem; color: var(--muted); }
+@media (max-width: 820px) {
+  .feature { grid-template-columns: 1fr; }
+  .feature .copy { position: static; }
+}
+
+/* ── Requirements and questions ── */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 22px; display: grid; gap: 12px; align-content: start; }
+.box ul, .box ol { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; }
+.box li { font-size: 0.98rem; }
+.box li::marker { color: var(--accent); font-weight: 700; }
+.must { font: 600 0.72rem/1 var(--body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-left: 6px; }
+
+footer { padding-block: 36px 56px; color: var(--muted); font-size: 0.92rem; display: grid; gap: 6px; }
+
+/* ── Zoom ── */
+dialog { border: 0; padding: 0; max-width: min(1440px, 96vw); max-height: 92vh; background: var(--surface); border-radius: 8px; overflow: auto; }
+dialog::backdrop { background: rgba(8, 14, 13, 0.78); }
+dialog img { display: block; width: 100%; height: auto; }
+dialog button { position: sticky; top: 8px; float: right; margin: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: 600 0.9rem var(--body); cursor: pointer; }
+@media (prefers-reduced-motion: no-preference) { .shot { transition: transform 0.15s ease; } .shot:hover { transform: translateY(-2px); } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Emergency lighting inverters · UL 924</div>
+    <h1>One system from price book to shop floor</h1>
+    <p>We build lighting inverters and sell them under three companies. Today our part numbers and prices live in an in-house master, quoting happens in a separate CRM, BOMs are built by hand, and material planning runs in INMASS. This portal shows the system we want in one place, with a working prototype of the first three apps.</p>
+    <div class="companies" aria-label="Our three companies">
+      <div class="co"><b>OLP</b><span>Online Power · parent and manufacturer</span></div>
+      <div class="co"><b>CPP</b><span>Crucial Power</span></div>
+      <div class="co"><b>PPS</b><span>Perfect Power</span></div>
+    </div>
+    <p class="demo-note">Every company, contact, price and cost shown here is fictional demo data.</p>
+  </div>
+</header>
+
+<nav class="nav" aria-label="Sections">
+  <div class="wrap">
+    <ul>
+      <li><a href="#flow">The flow</a></li>
+      <li><a href="#master">Product master</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+      <li><a href="#crm">CRM</a></li>
+      <li><a href="#quoting">Quoting</a></li>
+      <li><a href="#next">Still to build</a></li>
+      <li><a href="#odoo">For Odoo</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main>
+  <section id="flow">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">How work moves</div>
+        <h2>Order to build, without re-typing anything</h2>
+        <p>Each step hands its data to the next. The part number and price chosen on the quote are the same ones engineering builds the BOM from and MRP plans against.</p>
+      </div>
+      <div class="flow">
+        <div class="step"><span class="state built">Prototype</span><h3>Product master</h3><p>Part numbers, options and prices for all three companies.</p></div>
+        <div class="step"><span class="state built">Prototype</span><h3>CRM</h3><p>Companies by territory and type, contacts, notes.</p></div>
+        <div class="step"><span class="state built">Prototype</span><h3>Quote</h3><p>Configured from the master, priced per company or private label.</p></div>
+        <div class="step"><span class="state next">To build</span><h3>Sales order</h3><p>A won quote becomes an order with locked prices.</p></div>
+        <div class="step"><span class="state next">To build</span><h3>Engineering BOM</h3><p>Draft BOM generated from the order's line items.</p></div>
+        <div class="step"><span class="state next">To build</span><h3>MRP</h3><p>Material requirements, shortages and purchasing. Replaces INMASS.</p></div>
+        <div class="step"><span class="state next">To build</span><h3>Manufacturing</h3><p>Work orders, component use and finished goods.</p></div>
+      </div>
+      <p class="today">Today these steps live in four separate programs: the in-house master, the CRM, hand-built BOMs, and INMASS.</p>
+    </div>
+  </section>
+
+  <section id="master">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">Product master</div>
+        <h2>Layers that build the part number for us</h2>
+        <p>Product group, then product, then the UL-listed capacity and voltages. Picking those builds the unit part number automatically, in each company's own prefix. Batteries and options hang off the product and carry their own part numbers.</p>
+      </div>
+
+      <div class="anatomy" aria-label="How a unit part number is built">
+        <div class="pnrow">
+          <div class="seg pre"><b>PW</b><span>Product prefix<br>(per company)</span></div>
+          <div class="seg"><b>2.1</b><span>Capacity<br>2.1 KW, UL listed</span></div>
+          <div class="seg"><b>A</b><span>Input voltage<br>120 V</span></div>
+          <div class="seg"><b>0100</b><span>Output voltage<br>120 V</span></div>
+          <div class="seg"><b>N1</b><span>Transformer<br>N1 none · T1 yes</span></div>
+        </div>
+        <div class="three">
+          <div><b>Online Power</b><code>PW2.1A0100N1</code><small>Power Wave 1 Standard Series</small></div>
+          <div><b>Crucial Power</b><code>WR2.1A0100N1</code><small>Wave Rider 1</small></div>
+          <div><b>Perfect Power</b><code>PD2.1A0100N1</code><small>Powerride 1</small></div>
+        </div>
+      </div>
+
+      <div class="feature" style="margin-top:44px">
+        <div class="copy">
+          <h3>Groups, products and capacities</h3>
+          <ul>
+            <li>Product groups such as Emergency Lighting Inverter UL924, Elevator Backup, Fire Alarm Backup UL1481.</li>
+            <li>Each product has a name and prefix for each company (Power Wave / Wave Rider / Powerride).</li>
+            <li>Capacities and voltages each carry the code they add to the part number.</li>
+            <li>Tick the combinations that are UL listed and the units are created for you.</li>
+          </ul>
+        </div>
+        <div class="plates">
+          <figure><button class="shot" type="button"><img src="shots/03-group.png" alt="Products in the Emergency Lighting Inverter group with names and prefixes for each company" loading="lazy"></button><figcaption>Products in a group, named and prefixed per company.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/04-setup.png" alt="Product setup with capacity, input voltage, output voltage and transformer codes" loading="lazy"></button><figcaption>Setup: the codes behind each part-number segment.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/05-units.png" alt="Units grid with part numbers and prices for OLP, CPP and PPS" loading="lazy"></button><figcaption>Units: generated part numbers with each company's price, its variance from OLP, and the transfer price.</figcaption></figure>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="copy">
+          <h3>Batteries and options</h3>
+          <ul>
+            <li>Batteries are matched to capacity, by runtime and type, with their own part numbers per company.</li>
+            <li>Options are shared by every capacity of a product: option group, then category, then sub-option, then an assigned part number.</li>
+            <li>That assigned part number carries the price and description for each company.</li>
+            <li>15 option groups: breakers, bypass, communication, transfer, battery, short-circuit rating, cabinet, TVSS, LCR, services, warranty, spares, field service, delta input, frequency.</li>
+          </ul>
+        </div>
+        <div class="plates">
+          <figure><button class="shot" type="button"><img src="shots/07-options.png" alt="Option groups with categories, sub-options and assigned part numbers" loading="lazy"></button><figcaption>Options: group, category and sub-option down to an assigned part number.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/06-batteries.png" alt="Batteries per capacity with runtime and type" loading="lazy"></button><figcaption>Batteries per capacity.</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">Pricing</div>
+        <h2>Three price books, one item master</h2>
+        <p>Every part number has a price for OLP, CPP and PPS. Online Power sells to the other two at a transfer price we control. OEMs and private labels buy at a multiplier we set per product.</p>
+      </div>
+
+      <div class="feature">
+        <div class="copy">
+          <h3>Item master and price tracking</h3>
+          <ul>
+            <li>Every part, grouped by type: units, batteries, options, breakers, services.</li>
+            <li>Price, part number and description written three ways, one per company.</li>
+            <li>Component cost on every item, so margin shows everywhere. It will come from MRP later.</li>
+            <li>Every price change is recorded automatically: old price, new price, date and reason.</li>
+            <li>Variance report flags items where company prices drift apart.</li>
+            <li>Mass update: raise a product, a group or everything by a percent, with rounding.</li>
+          </ul>
+        </div>
+        <div class="plates">
+          <figure><button class="shot" type="button"><img src="shots/09-item.png" alt="One item with part number, description and price for each company, plus price history" loading="lazy"></button><figcaption>One item: three companies side by side, transfer price, margins and its price history.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/08-items.png" alt="Item master grouped by item type" loading="lazy"></button><figcaption>Item master, organized by item type.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/10-variance.png" alt="Variance report of company price differences" loading="lazy"></button><figcaption>Variance between company prices.</figcaption></figure>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="copy">
+          <h3>Transfer price and private labels</h3>
+          <ul>
+            <li>Transfer price = OLP sell price × a percent per company (69% today), adjustable per item.</li>
+            <li>Private-label and OEM customers get a default multiplier plus a multiplier for each product (Wall Mount, Power Wave 1 and so on).</li>
+            <li>A quote for a private label is priced at base price × that product's multiplier.</li>
+          </ul>
+        </div>
+        <div class="plates">
+          <figure><button class="shot" type="button"><img src="shots/12-companies.png" alt="Our companies with transfer percent, and the list of private labels" loading="lazy"></button><figcaption>Our companies and private labels.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/13-private-label.png" alt="A private label's multiplier for each product, grouped by product group" loading="lazy"></button><figcaption>A private label's multiplier for every product.</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="crm">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">CRM</div>
+        <h2>Companies by territory, people by company</h2>
+        <p>Our reps, distributors, engineers, contractors and OEMs are organized by territory number and company type, color-coded by how the account is doing.</p>
+      </div>
+      <div class="feature">
+        <div class="copy">
+          <h3>What it does</h3>
+          <ul>
+            <li>Filter by territory, company type and status (engineer spec, sales progress, late, no activity, non-performing rep).</li>
+            <li>Each company lists its people with title, email and phone.</li>
+            <li>Notes on the whole company or on one person: calls, emails, meetings, visits.</li>
+            <li>The company page shows its quotes and starts a new one.</li>
+          </ul>
+        </div>
+        <div class="plates">
+          <figure><button class="shot" type="button"><img src="shots/14-crm.png" alt="Company list sorted by territory and colored by status" loading="lazy"></button><figcaption>Companies by territory, colored by status.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/15-company.png" alt="A company page with quotes, contacts and notes" loading="lazy"></button><figcaption>A company: its quotes, contacts and notes.</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quoting">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">Quoting</div>
+        <h2>Quotes built from the master, never typed in</h2>
+        <p>Start from a company, pick which of our companies is quoting, then configure: capacity, voltages, transformer, battery, options. Each configuration lands on the quote as a section with every part number and price filled in.</p>
+      </div>
+      <div class="feature">
+        <div class="copy">
+          <h3>What it does</h3>
+          <ul>
+            <li>Quote as OLP, CPP or PPS, each with its own part numbers and prices.</li>
+            <li>Private-label quotes apply that customer's multiplier per product.</li>
+            <li>Prices are locked when a line is added, so later price changes don't alter a sent quote. Reprice on purpose when needed.</li>
+            <li>Totals show sell, transfer from OLP, cost and margin.</li>
+          </ul>
+        </div>
+        <div class="plates">
+          <figure><button class="shot" type="button"><img src="shots/17-quote.png" alt="A quote with two configured sections, totals, cost and margin" loading="lazy"></button><figcaption>A quote with two configured units, their batteries and options.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/18-quote-oem.png" alt="A private-label quote showing the multiplier on each line" loading="lazy"></button><figcaption>A private-label quote: each line shows the multiplier applied.</figcaption></figure>
+          <figure><button class="shot" type="button"><img src="shots/16-quotes.png" alt="All quotes with status, company and total" loading="lazy"></button><figcaption>All quotes, filterable by status.</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="next">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">Still to build</div>
+        <h2>The rest of the flow</h2>
+        <p>These are not in the prototype yet. They are where INMASS and our hand-built BOMs get replaced.</p>
+      </div>
+      <div class="cols">
+        <div class="box"><h3>Sales orders</h3><ul><li>Won quote converts to a sales order with locked prices.</li><li>Quote PDFs in each company's branding, and quote revisions.</li></ul></div>
+        <div class="box"><h3>Engineering</h3><ul><li>Queue of new orders waiting for engineering.</li><li>Draft BOM generated from the order's units, batteries and options.</li><li>BOM revisions and approval, then release to MRP.</li></ul></div>
+        <div class="box"><h3>MRP and inventory</h3><ul><li>Multi-level BOMs, stock on hand, shortages.</li><li>Suggested purchase orders for components.</li><li>Component cost feeds back into the item master.</li></ul></div>
+        <div class="box"><h3>Manufacturing</h3><ul><li>Work orders and routings.</li><li>Component consumption and finished goods into stock.</li></ul></div>
+        <div class="box"><h3>Circuit breakers</h3><ul><li>Pick the right breaker from phase, capacity, voltage, input or output, and KAIC.</li></ul></div>
+        <div class="box"><h3>Access</h3><ul><li>Logins with roles: admin, sales, engineering, view-only.</li><li>Reps and distributors see only their own quotes.</li></ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="odoo">
+    <div class="wrap">
+      <div class="head">
+        <div class="eyebrow">For Odoo</div>
+        <h2>What has to work, and what we need to know</h2>
+      </div>
+      <div class="cols">
+        <div class="box">
+          <h3>Must work</h3>
+          <ol>
+            <li>Smart part numbers built from capacity, input voltage, output voltage and transformer, in three company prefixes.</li>
+            <li>One item with three part numbers, three descriptions and three prices (OLP, CPP, PPS).</li>
+            <li>Inter-company sales from OLP to CPP and PPS at an adjustable transfer percent.</li>
+            <li>Private-label multipliers per customer and per product.</li>
+            <li>Full price history and variance between companies.</li>
+            <li>Options shared across all capacities of a product, down to an assigned part number.</li>
+            <li>Quote → sales order → BOM → MRP → manufacturing with no re-keying.</li>
+            <li>Import of our current master and INMASS data.</li>
+          </ol>
+        </div>
+        <div class="box">
+          <h3>Questions</h3>
+          <ul>
+            <li>How would you model one item sold under three companies with different part numbers? Multi-company with product variants, or separate products linked together?</li>
+            <li>Can the product configurator generate our part number format, including suffixes like <span class="pn">-VA</span>?</li>
+            <li>How do pricelists handle a multiplier per private-label customer per product?</li>
+            <li>How is the inter-company transfer price posted, and can it be a percent of the parent's sell price?</li>
+            <li>Can a won quote generate a draft BOM from its lines automatically?</li>
+            <li>What does migrating from INMASS look like, and how long?</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div>Prototype built in-house to show the workflow. Every name, contact, price and cost on this page is fictional.</div>
+</footer>
+
+<dialog id="zoom" aria-label="Screenshot">
+  <button type="button" id="zoom-close">Close</button>
+  <img id="zoom-img" alt="">
+</dialog>
+
+<script>
+  const dialog = document.getElementById("zoom");
+  const big = document.getElementById("zoom-img");
+  document.querySelectorAll(".shot").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const img = btn.querySelector("img");
+      big.src = img.src;
+      big.alt = img.alt;
+      if (dialog.showModal) dialog.showModal();
+    });
+  });
+  document.getElementById("zoom-close").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+</script>
+</body>
+</html>
