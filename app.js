@@ -2,7 +2,7 @@
 // demo data comes from data.json and changes are kept in this browser's localStorage.
 "use strict";
 
-const KEY = "crm-build-demo-v3";
+const KEY = "crm-build-demo-v4";
 let db;
 
 async function loadFresh() {
@@ -124,7 +124,7 @@ function productOfItem(itemId) {
 
 // ── Router ─────────────────────────────────────────────────────
 
-const ui = { itemType: "", itemQ: "", varMin: 2, crmTerritory: "", crmType: "", crmQ: "", quoteStatus: "", noteFilter: "", capFilter: "" };
+const ui = { crmManager: "", crmSort: "territory", crmDir: 1, itemType: "", itemQ: "", varMin: 2, crmTerritory: "", crmType: "", crmQ: "", quoteStatus: "", noteFilter: "", capFilter: "" };
 // Configurator state, per product.
 let cfg = { productId: null, companyId: null, values: {}, battery: "", picks: {} };
 
@@ -976,6 +976,8 @@ const territoryLabel = (id) => {
   return t ? `${t.number} · ${t.name}` : "—";
 };
 const typeName = (id) => byId(db.companyTypes, id)?.name ?? "";
+const managerOf = (territoryId) => byId(db.territories, territoryId)?.manager ?? "";
+const managers = () => [...new Set(db.territories.map((t) => t.manager).filter(Boolean))].sort((a, b) => (a === "Open") - (b === "Open") || a.localeCompare(b));
 // Until sales orders exist, a won quote counts as an order.
 const ordersOf = (customerId) => db.quotes.filter((x) => x.customerId === customerId && x.status === "won");
 const orderNo = (id) => `SO-${String(id).padStart(5, "0")}`;
@@ -985,30 +987,44 @@ function companiesListView() {
   const list = db.customers
     .filter((c) => !ui.crmTerritory || c.territoryId === Number(ui.crmTerritory))
     .filter((c) => !ui.crmType || c.typeId === Number(ui.crmType))
-    .filter((c) => !q || c.name.toLowerCase().includes(q) || db.contacts.some((p) => p.companyId === c.id && (p.name + " " + p.email).toLowerCase().includes(q)))
-    .sort((a, b) => territoryNo(a.territoryId) - territoryNo(b.territoryId) || a.name.localeCompare(b.name));
+    .filter((c) => !ui.crmManager || managerOf(c.territoryId) === ui.crmManager)
+    .filter((c) => !q || c.name.toLowerCase().includes(q) || db.contacts.some((p) => p.companyId === c.id && (p.name + " " + p.email).toLowerCase().includes(q)));
+  const keys = {
+    territory: (c) => territoryNo(c.territoryId),
+    company: (c) => c.name.toLowerCase(),
+    type: (c) => typeName(c.typeId).toLowerCase(),
+  };
+  const key = keys[ui.crmSort] ?? keys.territory;
+  list.sort((x, y) => {
+    const a = key(x);
+    const b = key(y);
+    return (a < b ? -1 : a > b ? 1 : 0) * ui.crmDir || x.name.localeCompare(y.name);
+  });
+  const head = (k, label) =>
+    `<th><button type="button" class="sort ${ui.crmSort === k ? "on" : ""}" data-act="crmSort" data-v="${k}" aria-label="Sort by ${label}">${label}<span aria-hidden="true">${ui.crmSort === k ? (ui.crmDir > 0 ? " ▲" : " ▼") : " ↕"}</span></button></th>`;
   const rows = list
     .map(
       (c) =>
-        `<tr class="click" data-go="#/crm/company/${c.id}"><td style="white-space:nowrap">${esc(territoryLabel(c.territoryId))}</td><td><a href="#/crm/company/${c.id}"><b>${esc(c.name)}</b></a></td><td>${esc(typeName(c.typeId))}</td></tr>`,
+        `<tr class="click" data-go="#/crm/company/${c.id}"><td style="white-space:nowrap"><b class="tno">${territoryNo(c.territoryId)}</b> ${esc(byId(db.territories, c.territoryId)?.name ?? "")}</td><td><a href="#/crm/company/${c.id}"><b>${esc(c.name)}</b></a></td><td>${esc(typeName(c.typeId))}</td></tr>`,
     )
     .join("");
+  const active = ui.crmTerritory || ui.crmType || ui.crmManager || ui.crmQ;
   return `
     ${pageHead("Companies")}
     <div class="grid side">
       ${card(
         "",
         `<form data-form="crmFilter" class="row" style="margin-bottom:14px">
-          <label class="field" style="flex:0 1 260px"><span>Territory (NEMRA)</span><select name="territory"><option value="">All</option>${db.territories
-            .filter((t) => db.customers.some((c) => c.territoryId === t.id))
+          <label class="field" style="flex:0 1 230px"><span>Territory</span><select name="territory" data-live="crm"><option value="">All territories</option>${db.territories
             .map((t) => `<option value="${t.id}" ${Number(ui.crmTerritory) === t.id ? "selected" : ""}>${t.number} · ${esc(t.name)}</option>`)
             .join("")}</select></label>
-          <label class="field" style="flex:0 1 190px"><span>Company type</span><select name="type"><option value="">All</option>${db.companyTypes.map((t) => `<option value="${t.id}" ${Number(ui.crmType) === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
-          <label class="field"><span>Search</span><input name="q" value="${esc(ui.crmQ)}" placeholder="Company, employee name or email"></label>
-          <button class="btn secondary">Filter</button>
+          <label class="field" style="flex:0 1 180px"><span>Company type</span><select name="type" data-live="crm"><option value="">All types</option>${db.companyTypes.map((t) => `<option value="${t.id}" ${Number(ui.crmType) === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>
+          <label class="field" style="flex:0 1 210px"><span>Regional manager</span><select name="manager" data-live="crm"><option value="">All managers</option>${managers().map((m) => `<option value="${esc(m)}" ${ui.crmManager === m ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></label>
+          <label class="field"><span>Search</span><input name="q" value="${esc(ui.crmQ)}" placeholder="Company, employee name or email" data-live="crm-text"></label>
+          ${active ? `<button type="button" class="btn secondary" data-act="crmClear">Clear</button>` : ""}
         </form>` +
-          (rows ? table("<th>Territory</th><th>Company</th><th>Type</th>", rows) : `<div class="empty">No companies match.</div>`) +
-          `<p class="hint" style="margin:10px 0 0">${list.length} companies</p>`,
+          (rows ? table(`${head("territory", "Territory")}${head("company", "Company")}${head("type", "Type")}`, rows) : `<div class="empty">No companies match.</div>`) +
+          `<p class="hint" style="margin:10px 0 0">${list.length} of ${db.customers.length} companies</p>`,
       )}
       ${card(
         "New company",
@@ -1118,7 +1134,7 @@ function companyView(id) {
       "",
       `<form data-form="company" data-company="${id}" class="stack" style="max-width:560px">
         <label class="field"><span>Company name</span><input name="name" value="${esc(c.name)}" required></label>
-        <div class="row"><label class="field"><span>Territory (NEMRA)</span><select name="territory">${db.territories.map((t) => `<option value="${t.id}" ${c.territoryId === t.id ? "selected" : ""}>${t.number} · ${esc(t.name)}</option>`).join("")}</select></label>
+        <div class="row"><label class="field"><span>Territory</span><select name="territory">${db.territories.map((t) => `<option value="${t.id}" ${c.territoryId === t.id ? "selected" : ""}>${t.number} · ${esc(t.name)}</option>`).join("")}</select></label>
         <label class="field"><span>Type</span><select name="type">${db.companyTypes.map((t) => `<option value="${t.id}" ${c.typeId === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label></div>
         <div class="row"><label class="field"><span>Phone</span><input name="phone" value="${esc(c.phone)}"></label><label class="field"><span>Website</span><input name="website" value="${esc(c.website)}"></label></div>
         <label class="field"><span>Street</span><input name="street" value="${esc(c.street)}"></label>
@@ -1141,7 +1157,7 @@ function companyView(id) {
     ${crumbs([["#/crm", "Companies"]])}
     <div class="company-head">
       <h1>${esc(c.name)}</h1>
-      <div class="meta"><span>Territory ${esc(territoryLabel(c.territoryId))}</span><span>${esc(typeName(c.typeId))}</span>${c.city ? `<span>${esc([c.city, c.state].filter(Boolean).join(", "))}</span>` : ""}${c.phone ? `<span>${esc(c.phone)}</span>` : ""}</div>
+      <div class="meta"><span>Territory ${esc(territoryLabel(c.territoryId))}</span>${managerOf(c.territoryId) ? `<span>Manager: ${esc(managerOf(c.territoryId))}</span>` : ""}<span>${esc(typeName(c.typeId))}</span>${c.city ? `<span>${esc([c.city, c.state].filter(Boolean).join(", "))}</span>` : ""}${c.phone ? `<span>${esc(c.phone)}</span>` : ""}</div>
     </div>
     ${stats}
     ${card("", newQuote)}
@@ -1158,7 +1174,7 @@ function crmSettingsView() {
   return `
     ${pageHead("Territories & company types")}
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
-      ${card("Territories (NEMRA)", `<p class="hint">NEMRA's generally accepted electrical-industry territories. NEMRA names them but doesn't number them, so the numbers follow NEMRA's list order.</p>` + table("<th class='num'>No.</th><th>Territory</th><th class='num'>Companies</th>", db.territories.map((t) => `<tr><td class="num"><b>${t.number}</b></td><td>${esc(t.name)}</td><td class="num">${db.customers.filter((c) => c.territoryId === t.id).length}</td></tr>`).join("")))}
+      ${card("Territories", table("<th class='num'>No.</th><th>Territory</th><th>Regional manager</th><th class='num'>Companies</th>", db.territories.map((t) => `<tr class="click" data-act="pickTerritory" data-v="${t.id}"><td class="num"><b>${t.number}</b></td><td>${esc(t.name)}</td><td>${esc(t.manager)}</td><td class="num">${db.customers.filter((c) => c.territoryId === t.id).length}</td></tr>`).join("")))}
       ${card("Company types", table("<th>Type</th><th class='num'>Companies</th>", db.companyTypes.map((t) => `<tr><td>${esc(t.name)}</td><td class="num">${db.customers.filter((c) => c.typeId === t.id).length}</td></tr>`).join("")))}
     </div>`;
 }
@@ -1327,6 +1343,21 @@ const actions = {
   quoteStatus: (d) => ((ui.quoteStatus = d.v), render()),
   noteFilter: (d) => ((ui.noteFilter = d.v), render()),
   companyTab: (d) => ((ui.companyTab = d.v), render()),
+  crmSort(d) {
+    if (ui.crmSort === d.v) ui.crmDir *= -1;
+    else (ui.crmSort = d.v), (ui.crmDir = 1);
+    render();
+  },
+  crmClear() {
+    ui.crmTerritory = ui.crmType = ui.crmManager = ui.crmQ = "";
+    render();
+  },
+  pickTerritory(d) {
+    ui.crmTerritory = d.v;
+    ui.crmType = ui.crmManager = ui.crmQ = "";
+    location.hash = "#/crm";
+    render();
+  },
   personActivity: (d) => ((ui.companyTab = "activity"), (ui.noteFilter = d.v), render()),
   addConfigured(d) {
     const x = byId(db.quotes, d.quote);
@@ -1412,6 +1443,7 @@ const forms = {
   crmFilter(form, fd) {
     ui.crmTerritory = String(fd.get("territory") || "");
     ui.crmType = String(fd.get("type") || "");
+    ui.crmManager = String(fd.get("manager") || "");
     ui.crmQ = String(fd.get("q") || "");
   },
   newCompany(form, fd) {
@@ -1515,6 +1547,12 @@ document.addEventListener("submit", (e) => {
 
 document.addEventListener("change", (e) => {
   const el = e.target;
+  if (el.dataset.live === "crm") {
+    const f = new FormData(el.form);
+    forms.crmFilter(el.form, f);
+    render();
+    return;
+  }
   if (el.dataset.cfg) {
     const [kind, key] = el.dataset.cfg.split(/:(.*)/s);
     const v = el.value;
@@ -1528,6 +1566,23 @@ document.addEventListener("change", (e) => {
     cfg = { productId: null };
     render();
   }
+});
+
+let searchTimer;
+document.addEventListener("input", (e) => {
+  if (e.target.dataset.live !== "crm-text") return;
+  clearTimeout(searchTimer);
+  const value = e.target.value;
+  searchTimer = setTimeout(() => {
+    ui.crmQ = value;
+    render();
+    // Keep typing in the search box after the list redraws.
+    const box = document.querySelector('[data-live="crm-text"]');
+    if (box) {
+      box.focus();
+      box.setSelectionRange(value.length, value.length);
+    }
+  }, 250);
 });
 
 window.addEventListener("hashchange", () => {

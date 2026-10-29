@@ -121,6 +121,13 @@ dl.kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 18px; margin: 0
 dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; text-align: right; }
 dl.kv .strong { font-weight: 700; color: var(--ink); font-size: 15px; }
 
+/* Sortable headings */
+th .sort { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; font-weight: 600; }
+th .sort:hover, th .sort.on { color: var(--ink); }
+th .sort span { color: var(--faint); font-size: 11px; }
+th .sort.on span { color: var(--brand); }
+.tno { display: inline-block; min-width: 34px; font-variant-numeric: tabular-nums; }
+
 /* Company overview */
 .company-head { display: grid; gap: 6px; margin: 2px 0 16px; }
 .company-head .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 14.5px; }
